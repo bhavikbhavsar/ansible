@@ -1,30 +1,21 @@
 #!/usr/bin/python
 
 # (c) 2016, NetApp, Inc
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = """
 ---
 module: netapp_e_snapshot_group
-short_description: Manage snapshot groups
+short_description: NetApp E-Series manage snapshot groups
 description:
     - Create, update, delete snapshot groups for NetApp E-series storage arrays
 version_added: '2.2'
@@ -47,6 +38,7 @@ options:
         default: true
         description:
         - Should https certificates be validated?
+        type: bool
     state:
         description:
             - Whether to ensure the group is present or absent.
@@ -77,7 +69,8 @@ options:
     delete_limit:
         description:
             - The automatic deletion indicator.
-            - If non-zero, the oldest snapshot image will be automatically deleted when creating a new snapshot image to keep the total number of snapshot images limited to the number specified.
+            - If non-zero, the oldest snapshot image will be automatically deleted when creating a new snapshot image to keep the total number of
+              snapshot images limited to the number specified.
             - This value is overridden by the consistency group setting if this snapshot group is associated with a consistency group.
         required: False
         default: 30
@@ -132,7 +125,7 @@ RETURN = """
 msg:
     description: Success message
     returned: success
-    type: string
+    type: str
     sample: json facts for newly created snapshot group.
 """
 HEADERS = {
@@ -144,7 +137,7 @@ import json
 from ansible.module_utils.api import basic_auth_argument_spec
 from ansible.module_utils.basic import AnsibleModule
 
-from ansible.module_utils.pycompat24 import get_exception
+from ansible.module_utils._text import to_native
 from ansible.module_utils.urls import open_url
 from ansible.module_utils.six.moves.urllib.error import HTTPError
 
@@ -157,8 +150,7 @@ def request(url, data=None, headers=None, method='GET', use_proxy=True,
                      force=force, last_mod_time=last_mod_time, timeout=timeout, validate_certs=validate_certs,
                      url_username=url_username, url_password=url_password, http_agent=http_agent,
                      force_basic_auth=force_basic_auth)
-    except HTTPError:
-        err = get_exception()
+    except HTTPError as err:
         r = err.fp
 
     try:
@@ -167,7 +159,7 @@ def request(url, data=None, headers=None, method='GET', use_proxy=True,
             data = json.loads(raw_data)
         else:
             raw_data = None
-    except:
+    except Exception:
         if ignore_errors:
             pass
         else:
@@ -231,10 +223,9 @@ class SnapshotGroup(object):
         url = self.url + pools
         try:
             (rc, data) = request(url, headers=HEADERS, url_username=self.user, url_password=self.pwd)
-        except:
-            err = get_exception()
+        except Exception as err:
             self.module.fail_json(msg="Snapshot group module - Failed to fetch storage pools. " +
-                                      "Id [%s]. Error [%s]." % (self.ssid, str(err)))
+                                      "Id [%s]. Error [%s]." % (self.ssid, to_native(err)))
 
         for pool in data:
             if pool['name'] == self.storage_pool_name:
@@ -250,10 +241,9 @@ class SnapshotGroup(object):
         try:
             rc, data = request(url, headers=HEADERS, url_username=self.user, url_password=self.pwd,
                                validate_certs=self.certs)
-        except:
-            err = get_exception()
+        except Exception as err:
             self.module.fail_json(msg="Snapshot group module - Failed to fetch volumes. " +
-                                      "Id [%s]. Error [%s]." % (self.ssid, str(err)))
+                                      "Id [%s]. Error [%s]." % (self.ssid, to_native(err)))
         qty = 0
         for volume in data:
             if volume['name'] == self.base_volume_name:
@@ -277,10 +267,9 @@ class SnapshotGroup(object):
         try:
             rc, data = request(url, headers=HEADERS, url_username=self.user, url_password=self.pwd,
                                validate_certs=self.certs)
-        except:
-            err = get_exception()
+        except Exception as err:
             self.module.fail_json(msg="Failed to fetch snapshot groups. " +
-                                      "Id [%s]. Error [%s]." % (self.ssid, str(err)))
+                                      "Id [%s]. Error [%s]." % (self.ssid, to_native(err)))
         for ssg in data:
             if ssg['name'] == self.name:
                 self.ssg_data = ssg
@@ -313,12 +302,11 @@ class SnapshotGroup(object):
         try:
             rc, self.ssg_data = request(url, data=json.dumps(self.post_data), method='POST', headers=HEADERS,
                                         url_username=self.user, url_password=self.pwd, validate_certs=self.certs)
-        except:
-            err = get_exception()
+        except Exception as err:
             self.module.fail_json(msg="Failed to create snapshot group. " +
                                       "Snapshot group [%s]. Id [%s]. Error [%s]." % (self.name,
                                                                                      self.ssid,
-                                                                                     str(err)))
+                                                                                     to_native(err)))
 
         if not self.snapshot_group_id:
             self.snapshot_group_id = self.ssg_data['id']
@@ -340,12 +328,11 @@ class SnapshotGroup(object):
         try:
             rc, self.ssg_data = request(url, data=json.dumps(self.post_data), method='POST', headers=HEADERS,
                                         url_username=self.user, url_password=self.pwd, validate_certs=self.certs)
-        except:
-            err = get_exception()
+        except Exception as err:
             self.module.fail_json(msg="Failed to update snapshot group. " +
                                       "Snapshot group [%s]. Id [%s]. Error [%s]." % (self.name,
                                                                                      self.ssid,
-                                                                                     str(err)))
+                                                                                     to_native(err)))
 
     def apply(self):
         if self.state == 'absent':
@@ -355,12 +342,11 @@ class SnapshotGroup(object):
                         self.url + 'storage-systems/%s/snapshot-groups/%s' % (self.ssid, self.snapshot_group_id),
                         method='DELETE', headers=HEADERS, url_password=self.pwd, url_username=self.user,
                         validate_certs=self.certs)
-                except:
-                    err = get_exception()
+                except Exception as err:
                     self.module.fail_json(msg="Failed to delete snapshot group. " +
                                               "Snapshot group [%s]. Id [%s]. Error [%s]." % (self.name,
                                                                                              self.ssid,
-                                                                                             str(err)))
+                                                                                             to_native(err)))
                 self.module.exit_json(changed=True, msg="Snapshot group removed", **self.ssg_data)
             else:
                 self.module.exit_json(changed=False, msg="Snapshot group absent")

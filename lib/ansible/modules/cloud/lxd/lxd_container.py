@@ -1,27 +1,17 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# (c) 2016, Hiroaki Nakamura <hnakamur@gmail.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: (c) 2016, Hiroaki Nakamura <hnakamur@gmail.com>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -65,6 +55,7 @@ options:
           - Whether or not the container is ephemeral (e.g. true or false).
             See U(https://github.com/lxc/lxd/blob/master/doc/rest-api.md#post-1)
         required: false
+        type: bool
     source:
         description:
           - 'The source for the container
@@ -72,8 +63,9 @@ options:
                     "mode": "pull",
                     "server": "https://images.linuxcontainers.org",
                     "protocol": "lxd",
-                    "alias": "ubuntu/xenial/amd64" }).
-            See U(https://github.com/lxc/lxd/blob/master/doc/rest-api.md#post-1)'
+                    "alias": "ubuntu/xenial/amd64" }).'
+          - 'See U(https://github.com/lxc/lxd/blob/master/doc/rest-api.md#post-1) for complete API documentation.'
+          - 'Note that C(protocol) accepts two choices: C(lxd) or C(simplestreams)'
         required: false
     state:
         choices:
@@ -101,17 +93,25 @@ options:
             starting or restarting.
         required: false
         default: false
+        type: bool
     force_stop:
         description:
           - If this is true, the C(lxd_container) forces to stop the container
             when it stops or restarts the container.
         required: false
         default: false
+        type: bool
     url:
         description:
           - The unix domain socket path or the https URL for the LXD server.
         required: false
         default: unix:/var/lib/lxd/unix.socket
+    snap_url:
+        description:
+          - The unix domain socket path when LXD is installed by snap package manager.
+        required: false
+        default: unix:/var/snap/lxd/common/lxd/unix.socket
+        version_added: '2.8'
     key_file:
         description:
           - The client certificate key file path.
@@ -136,7 +136,7 @@ notes:
   - Containers must have a unique name. If you attempt to create a container
     with a name that already existed in the users namespace the module will
     simply return as "unchanged".
-  - There are two ways to can run commands in containers, using the command
+  - There are two ways to run commands in containers, using the command
     module or using the ansible lxd connection plugin bundled in Ansible >=
     2.1, the later requires python to be installed in the container which can
     be done with the command module.
@@ -161,7 +161,7 @@ EXAMPLES = '''
           type: image
           mode: pull
           server: https://images.linuxcontainers.org
-          protocol: lxd
+          protocol: lxd # if you get a 404, try setting protocol: simplestreams
           alias: ubuntu/xenial/amd64
         profiles: ["default"]
         wait_for_ipv4_addresses: true
@@ -226,16 +226,16 @@ EXAMPLES = '''
         flat: true
 '''
 
-RETURN='''
+RETURN = '''
 addresses:
   description: Mapping from the network device name to a list of IPv4 addresses in the container
   returned: when state is started or restarted
-  type: object
+  type: dict
   sample: {"eth0": ["10.155.92.191"]}
 old_state:
   description: The old state of the container
   returned: when state is started or restarted
-  type: string
+  type: str
   sample: "stopped"
 logs:
   description: The logs of requests and responses.
@@ -248,9 +248,13 @@ actions:
   type: list
   sample: '["create", "start"]'
 '''
-
+import datetime
 import os
+import time
+
+from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.lxd import LXDClient, LXDClientException
+
 
 # LXD_ANSIBLE_STATES is a map of states that contain values of methods used
 # when a particular state is evoked.
@@ -275,16 +279,6 @@ CONFIG_PARAMS = [
     'architecture', 'config', 'devices', 'ephemeral', 'profiles', 'source'
 ]
 
-try:
-    callable(all)
-except NameError:
-    # For python <2.5
-    # This definition is copied from https://docs.python.org/2/library/functions.html#all
-    def all(iterable):
-        for element in iterable:
-            if not element:
-                return False
-        return True
 
 class LXDContainerManagement(object):
     def __init__(self, module):
@@ -304,10 +298,18 @@ class LXDContainerManagement(object):
         self.force_stop = self.module.params['force_stop']
         self.addresses = None
 
-        self.url = self.module.params['url']
         self.key_file = self.module.params.get('key_file', None)
         self.cert_file = self.module.params.get('cert_file', None)
         self.debug = self.module._verbosity >= 4
+
+        try:
+            if os.path.exists(self.module.params['snap_url'].replace('unix:', '')):
+                self.url = self.module.params['snap_url']
+            else:
+                self.url = self.module.params['url']
+        except Exception as e:
+            self.module.fail_json(msg=e.msg)
+
         try:
             self.client = LXDClient(
                 self.url, key_file=self.key_file, cert_file=self.cert_file,
@@ -344,7 +346,7 @@ class LXDContainerManagement(object):
         return ANSIBLE_LXD_STATES[resp_json['metadata']['status']]
 
     def _change_state(self, action, force_stop=False):
-        body_json={'action': action, 'timeout': self.timeout}
+        body_json = {'action': action, 'timeout': self.timeout}
         if force_stop:
             body_json['force'] = True
         return self.client.do('PUT', '/1.0/containers/{0}/state'.format(self.name), body_json=body_json)
@@ -379,7 +381,9 @@ class LXDContainerManagement(object):
         self._change_state('unfreeze')
         self.actions.append('unfreez')
 
-    def _container_ipv4_addresses(self, ignore_devices=['lo']):
+    def _container_ipv4_addresses(self, ignore_devices=None):
+        ignore_devices = ['lo'] if ignore_devices is None else ignore_devices
+
         resp_json = self._get_container_state_json()
         network = resp_json['metadata']['network'] or {}
         network = dict((k, v) for k, v in network.items() if k not in ignore_devices) or {}
@@ -388,7 +392,7 @@ class LXDContainerManagement(object):
 
     @staticmethod
     def _has_all_ipv4_addresses(addresses):
-        return len(addresses) > 0 and all([len(v) > 0 for v in addresses.values()])
+        return len(addresses) > 0 and all(len(v) > 0 for v in addresses.values())
 
     def _get_addresses(self):
         try:
@@ -471,9 +475,13 @@ class LXDContainerManagement(object):
             return False
         if key == 'config':
             old_configs = dict((k, v) for k, v in self.old_container_json['metadata'][key].items() if not k.startswith('volatile.'))
+            for k, v in self.config['config'].items():
+                if old_configs[k] != v:
+                    return True
+            return False
         else:
             old_configs = self.old_container_json['metadata'][key]
-        return self.config[key] != old_configs
+            return self.config[key] != old_configs
 
     def _needs_to_apply_container_configs(self):
         return (
@@ -541,6 +549,7 @@ class LXDContainerManagement(object):
                 fail_params['logs'] = e.kwargs['logs']
             self.module.fail_json(**fail_params)
 
+
 def main():
     """Ansible Main module."""
 
@@ -555,9 +564,6 @@ def main():
             ),
             config=dict(
                 type='dict',
-            ),
-            description=dict(
-                type='str',
             ),
             devices=dict(
                 type='dict',
@@ -591,15 +597,19 @@ def main():
                 type='str',
                 default='unix:/var/lib/lxd/unix.socket'
             ),
+            snap_url=dict(
+                type='str',
+                default='unix:/var/snap/lxd/common/lxd/unix.socket'
+            ),
             key_file=dict(
                 type='str',
-                default='{}/.config/lxc/client.key'.format(os.environ['HOME'])
+                default='{0}/.config/lxc/client.key'.format(os.environ['HOME'])
             ),
             cert_file=dict(
                 type='str',
-                default='{}/.config/lxc/client.crt'.format(os.environ['HOME'])
+                default='{0}/.config/lxc/client.crt'.format(os.environ['HOME'])
             ),
-            trust_password=dict( type='str', no_log=True )
+            trust_password=dict(type='str', no_log=True)
         ),
         supports_check_mode=False,
     )
@@ -607,7 +617,6 @@ def main():
     lxd_manage = LXDContainerManagement(module=module)
     lxd_manage.run()
 
-# import module bits
-from ansible.module_utils.basic import *
+
 if __name__ == '__main__':
     main()

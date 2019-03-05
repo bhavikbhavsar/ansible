@@ -21,25 +21,31 @@ __metaclass__ = type
 
 import json
 
-from ansible.compat.tests.mock import patch
+from units.compat.mock import patch
+from ansible.module_utils.basic import get_timestamp
 from ansible.modules.network.nxos import nxos_command
 from .nxos_module import TestNxosModule, load_fixture, set_module_args
+
 
 class TestNxosCommandModule(TestNxosModule):
 
     module = nxos_command
 
     def setUp(self):
+        super(TestNxosCommandModule, self).setUp()
+
         self.mock_run_commands = patch('ansible.modules.network.nxos.nxos_command.run_commands')
         self.run_commands = self.mock_run_commands.start()
 
     def tearDown(self):
+        super(TestNxosCommandModule, self).tearDown()
         self.mock_run_commands.stop()
 
-    def load_fixtures(self, commands=None):
+    def load_fixtures(self, commands=None, device=''):
         def load_from_file(*args, **kwargs):
             module, commands = args
             output = list()
+            timestamps = list()
 
             for item in commands:
                 try:
@@ -47,10 +53,10 @@ class TestNxosCommandModule(TestNxosModule):
                     command = obj['command']
                 except ValueError:
                     command = item['command']
-                filename = str(command).replace(' ', '_')
-                filename = 'nxos_command/%s.txt' % filename
-                output.append(load_fixture(filename))
-            return output
+                filename = '%s.txt' % str(command).replace(' ', '_')
+                output.append(load_fixture('nxos_command', filename))
+                timestamps.append(get_timestamp())
+            return output, timestamps
 
         self.run_commands.side_effect = load_from_file
 
@@ -67,7 +73,7 @@ class TestNxosCommandModule(TestNxosModule):
         self.assertTrue(result['stdout'][0].startswith('Cisco'))
 
     def test_nxos_command_wait_for(self):
-        wait_for = 'result[0] contains "Cisco NX-OS"'
+        wait_for = 'result[0] contains "NX-OS"'
         set_module_args(dict(commands=['show version'], wait_for=wait_for))
         self.execute_module()
 
@@ -91,7 +97,7 @@ class TestNxosCommandModule(TestNxosModule):
 
     def test_nxos_command_match_all(self):
         wait_for = ['result[0] contains "Cisco"',
-                    'result[0] contains "system image file"']
+                    'result[0] contains "image file"']
         set_module_args(dict(commands=['show version'], wait_for=wait_for, match='all'))
         self.execute_module()
 

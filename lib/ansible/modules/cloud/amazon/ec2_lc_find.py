@@ -2,25 +2,16 @@
 # encoding: utf-8
 
 # (c) 2015, Jose Armesto <jose@armesto.net>
-#
-# This file is part of Ansible
-#
-# This module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this software.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = """
 ---
@@ -50,16 +41,15 @@ options:
       - Order in which to sort results.
     choices: ['ascending', 'descending']
     default: 'ascending'
-    required: false
   limit:
     description:
       - How many results to show.
       - Corresponds to Python slice notation like list[:limit].
-    default: null
-    required: false
 requirements:
   - "python >= 2.6"
   - boto3
+extends_documentation_fragment:
+    - aws
 """
 
 EXAMPLES = '''
@@ -76,42 +66,42 @@ RETURN = '''
 image_id:
     description: AMI id
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: "ami-0d75df7e"
 user_data:
     description: User data used to start instance
     returned: when Launch Configuration was found
-    type: string
-    user_data: "ZXhwb3J0IENMT1VE"
+    type: str
+    sample: "ZXhwb3J0IENMT1VE"
 name:
-    description: Name of the AMI
+    description: Name of the Launch Configuration
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: "myapp-v123"
 arn:
     description: Name of the AMI
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: "arn:aws:autoscaling:eu-west-1:12345:launchConfiguration:d82f050e-e315:launchConfigurationName/yourproject"
 instance_type:
     description: Type of ec2 instance
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: "t2.small"
 created_time:
     description: When it was created
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: "2016-06-29T14:59:22.222000+00:00"
 ebs_optimized:
     description: Launch Configuration EBS optimized property
     returned: when Launch Configuration was found
-    type: boolean
+    type: bool
     sample: False
 instance_monitoring:
     description: Launch Configuration instance monitoring property
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: {"Enabled": false}
 classic_link_vpc_security_groups:
     description: Launch Configuration classic link vpc security groups property
@@ -126,7 +116,7 @@ block_device_mappings:
 keyname:
     description: Launch Configuration ssh key
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: mykey
 security_groups:
     description: Launch Configuration security groups
@@ -136,20 +126,24 @@ security_groups:
 kernel_id:
     description: Launch Configuration kernel to use
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: ''
 ram_disk_id:
     description: Launch Configuration ram disk property
     returned: when Launch Configuration was found
-    type: string
+    type: str
     sample: ''
 associate_public_address:
     description: Assign public address or not
     returned: when Launch Configuration was found
-    type: boolean
+    type: bool
     sample: True
 ...
 '''
+import re
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import boto3_conn, ec2_argument_spec, get_aws_connection_info
 
 
 def find_launch_configs(client, module):
@@ -220,10 +214,6 @@ def main():
     client = boto3_conn(module=module, conn_type='client', resource='autoscaling', region=region, **aws_connect_params)
     find_launch_configs(client, module)
 
-
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

@@ -16,11 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
@@ -52,7 +51,7 @@ options:
         argument to False.
     required: false
     default: yes
-    choices: ['yes', 'no']
+    type: bool
     aliases: ['enable_http']
   https_port:
     description:
@@ -71,7 +70,7 @@ options:
         argument to True.
     required: false
     default: no
-    choices: ['yes', 'no']
+    type: bool
     aliases: ['enable_https']
   sandbox:
     description:
@@ -80,10 +79,10 @@ options:
         the NXAPI feature is configured for the first time.  When the
         C(sandbox) argument is set to True, the developer sandbox URL
         will accept requests and when the value is set to False, the
-        sandbox URL is unavailable.
+        sandbox URL is unavailable. This is supported on NX-OS 7K series.
     required: false
     default: no
-    choices: ['yes', 'no']
+    type: bool
     aliases: ['enable_sandbox']
   state:
     description:
@@ -95,6 +94,43 @@ options:
     choices: ['present', 'absent']
     required: false
     default: present
+  ssl_strong_ciphers:
+    description:
+      - Controls the use of whether strong or weak ciphers are configured.
+        By default, this feature is disabled and weak ciphers are
+        configured.  To enable the use of strong ciphers, set the value of
+        this argument to True.
+    required: false
+    default: no
+    type: bool
+    version_added: "2.7"
+  tlsv1_0:
+    description:
+      - Controls the use of the Transport Layer Security version 1.0 is
+        configured.  By default, this feature is enabled.  To disable the
+        use of TLSV1.0, set the value of this argument to True.
+    required: false
+    default: yes
+    type: bool
+    version_added: "2.7"
+  tlsv1_1:
+    description:
+      - Controls the use of the Transport Layer Security version 1.1 is
+        configured.  By default, this feature is disabled.  To enable the
+        use of TLSV1.1, set the value of this argument to True.
+    required: false
+    default: no
+    type: bool
+    version_added: "2.7"
+  tlsv1_2:
+    description:
+      - Controls the use of the Transport Layer Security version 1.2 is
+        configured.  By default, this feature is disabled.  To enable the
+        use of TLSV1.2, set the value of this argument to True.
+    required: false
+    default: no
+    type: bool
+    version_added: "2.7"
 """
 
 EXAMPLES = """
@@ -125,22 +161,22 @@ updates:
 """
 import re
 
-from functools import partial
-
-from ansible.module_utils.nxos import run_commands, load_config
-from ansible.module_utils.nxos import nxos_argument_spec
-from ansible.module_utils.nxos import check_args as nxos_check_args
+from distutils.version import LooseVersion
+from ansible.module_utils.network.nxos.nxos import run_commands, load_config
+from ansible.module_utils.network.nxos.nxos import nxos_argument_spec
+from ansible.module_utils.network.nxos.nxos import get_capabilities
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.netcfg import NetworkConfig
 from ansible.module_utils.six import iteritems
 
-def check_args(module, warnings):
-    transport = module.params['transport']
-    provider_transport = (module.params['provider'] or {}).get('transport')
-    if 'nxapi' in (transport, provider_transport):
-        module.fail_json(msg='transport=nxapi is not supporting when configuring nxapi')
 
-    nxos_check_args(module, warnings)
+def check_args(module, warnings, capabilities):
+    network_api = capabilities.get('network_api', 'nxapi')
+    if network_api == 'nxapi':
+        module.fail_json(msg='module not supported over nxapi transport')
+
+    os_platform = capabilities['device_info']['network_os_platform']
+    if '7K' not in os_platform and module.params['sandbox']:
+        module.fail_json(msg='sandbox or enable_sandbox is supported on NX-OS 7K series of switches')
 
     state = module.params['state']
 
@@ -153,90 +189,158 @@ def check_args(module, warnings):
         warnings.append('state=stopped is deprecated and will be removed in a '
                         'a future release.  Please use state=absent instead')
 
-    if module.params['transport'] == 'nxapi':
-        module.fail_json(msg='module not supported over nxapi transport')
-
-    for key in ['config']:
-        if module.params[key]:
-            warnings.append('argument %s is deprecated and will be ignored' % key)
+    for key in ['http_port', 'https_port']:
+        if module.params[key] is not None:
+            if not 1 <= module.params[key] <= 65535:
+                module.fail_json(msg='%s must be between 1 and 65535' % key)
 
     return warnings
 
-def map_obj_to_commands(updates, module):
-    commands = list()
-    want, have = updates
 
-    needs_update = lambda x: want.get(x) is not None and (want.get(x) != have.get(x))
+def map_obj_to_commands(want, have, module, warnings, capabilities):
+    send_commands = list()
+    commands = dict()
+    os_platform = None
+    os_version = None
+
+    device_info = capabilities.get('device_info')
+    if device_info:
+        os_version = device_info.get('network_os_version')
+        if os_version:
+            os_version = os_version[:3]
+        os_platform = device_info.get('network_os_platform')
+        if os_platform:
+            os_platform = os_platform[:3]
+
+    def needs_update(x):
+        return want.get(x) is not None and (want.get(x) != have.get(x))
 
     if needs_update('state'):
         if want['state'] == 'absent':
             return ['no feature nxapi']
-        commands.append('feature nxapi')
+        send_commands.append('feature nxapi')
+    elif want['state'] == 'absent':
+        return send_commands
 
-    if any((needs_update('http'), needs_update('http_port'))):
-        if want['http'] is True or (want['http'] is None and have['http'] is True):
-            port = want['http_port'] or 80
-            commands.append('nxapi http port %s' % port)
-        elif want['http'] is False:
-            commands.append('no nxapi http')
+    for parameter in ['http', 'https']:
+        port_param = parameter + '_port'
+        if needs_update(parameter):
+            if want.get(parameter) is False:
+                commands[parameter] = 'no nxapi %s' % parameter
+            else:
+                commands[parameter] = 'nxapi %s port %s' % (parameter, want.get(port_param))
 
-    if any((needs_update('https'), needs_update('https_port'))):
-        if want['https'] is True or (want['https'] is None and have['https'] is True):
-            port = want['https_port'] or 443
-            commands.append('nxapi https port %s' % port)
-        elif want['https'] is False:
-            commands.append('no nxapi https')
+        if needs_update(port_param) and want.get(parameter) is True:
+            commands[parameter] = 'nxapi %s port %s' % (parameter, want.get(port_param))
 
     if needs_update('sandbox'):
-        cmd = 'nxapi sandbox'
+        commands['sandbox'] = 'nxapi sandbox'
         if not want['sandbox']:
-            cmd = 'no %s' % cmd
-        commands.append(cmd)
+            commands['sandbox'] = 'no %s' % commands['sandbox']
 
-    return commands
+    if os_platform and os_version:
+        if (os_platform == 'N9K' or os_platform == 'N3K') and LooseVersion(os_version) >= "9.2":
+            if needs_update('ssl_strong_ciphers'):
+                commands['ssl_strong_ciphers'] = 'nxapi ssl ciphers weak'
+                if want['ssl_strong_ciphers'] is True:
+                    commands['ssl_strong_ciphers'] = 'no nxapi ssl ciphers weak'
+
+            have_ssl_protocols = ''
+            want_ssl_protocols = ''
+            for key, value in {'tlsv1_2': 'TLSv1.2', 'tlsv1_1': 'TLSv1.1', 'tlsv1_0': 'TLSv1'}.items():
+                if needs_update(key):
+                    if want.get(key) is True:
+                        want_ssl_protocols = " ".join([want_ssl_protocols, value])
+                elif have.get(key) is True:
+                    have_ssl_protocols = " ".join([have_ssl_protocols, value])
+
+            if len(want_ssl_protocols) > 0:
+                commands['ssl_protocols'] = 'nxapi ssl protocols%s' % (" ".join([want_ssl_protocols, have_ssl_protocols]))
+    else:
+        warnings.append('os_version and/or os_platform keys from '
+                        'platform capabilities are not available.  '
+                        'Any NXAPI SSL optional arguments will be ignored')
+
+    send_commands.extend(commands.values())
+
+    return send_commands
+
 
 def parse_http(data):
-    match = re.search('HTTP Port:\s+(\d+)', data, re.M)
-    if match:
-        return {'http': True, 'http_port': int(match.group(1))}
-    else:
-        return {'http': False, 'http_port': None}
+    http_res = [r'nxapi http port (\d+)']
+    http_port = None
+
+    for regex in http_res:
+        match = re.search(regex, data, re.M)
+        if match:
+            http_port = int(match.group(1))
+            break
+
+    return {'http': http_port is not None, 'http_port': http_port}
+
 
 def parse_https(data):
-    match = re.search('HTTPS Port:\s+(\d+)', data, re.M)
-    if match:
-        return {'https': True, 'https_port': int(match.group(1))}
-    else:
-        return {'https': False, 'https_port': None}
+    https_res = [r'nxapi https port (\d+)']
+    https_port = None
+
+    for regex in https_res:
+        match = re.search(regex, data, re.M)
+        if match:
+            https_port = int(match.group(1))
+            break
+
+    return {'https': https_port is not None, 'https_port': https_port}
+
 
 def parse_sandbox(data):
-    match = re.search('Sandbox:\s+(.+)$', data, re.M)
-    value = None
-    if match:
-        value = match.group(1) == 'Enabled'
+    sandbox = [item for item in data.split('\n') if re.search(r'.*sandbox.*', item)]
+    value = False
+    if sandbox and sandbox[0] == 'nxapi sandbox':
+        value = True
     return {'sandbox': value}
 
+
+def parse_ssl_strong_ciphers(data):
+    ciphers_res = [r'(\w+) nxapi ssl ciphers weak']
+    value = None
+
+    for regex in ciphers_res:
+        match = re.search(regex, data, re.M)
+        if match:
+            value = match.group(1)
+            break
+
+    return {'ssl_strong_ciphers': value == 'no'}
+
+
+def parse_ssl_protocols(data):
+    tlsv1_0 = re.search(r'(?<!\S)TLSv1(?!\S)', data, re.M) is not None
+    tlsv1_1 = re.search(r'(?<!\S)TLSv1.1(?!\S)', data, re.M) is not None
+    tlsv1_2 = re.search(r'(?<!\S)TLSv1.2(?!\S)', data, re.M) is not None
+
+    return {'tlsv1_0': tlsv1_0, 'tlsv1_1': tlsv1_1, 'tlsv1_2': tlsv1_2}
+
+
 def map_config_to_obj(module):
-    out = run_commands(module, ['show nxapi'], check_rc=False)
-    if out[0] == '':
+    out = run_commands(module, ['show run all | inc nxapi'], check_rc=False)[0]
+    match = re.search(r'no feature nxapi', out, re.M)
+    # There are two possible outcomes when nxapi is disabled on nxos platforms.
+    # 1. Nothing is displayed in the running config.
+    # 2. The 'no feature nxapi' command is displayed in the running config.
+    if match or out == '':
         return {'state': 'absent'}
 
-    out = str(out[0]).strip()
+    out = str(out).strip()
 
     obj = {'state': 'present'}
     obj.update(parse_http(out))
     obj.update(parse_https(out))
     obj.update(parse_sandbox(out))
+    obj.update(parse_ssl_strong_ciphers(out))
+    obj.update(parse_ssl_protocols(out))
 
     return obj
 
-def validate_http_port(value, module):
-    if not 1 <= module.params['http_port'] <= 65535:
-        module.fail_json(msg='http_port must be between 1 and 65535')
-
-def validate_https_port(value, module):
-    if not 1 <= module.params['https_port'] <= 65535:
-        module.fail_json(msg='https_port must be between 1 and 65535')
 
 def map_params_to_obj(module):
     obj = {
@@ -245,33 +349,30 @@ def map_params_to_obj(module):
         'https': module.params['https'],
         'https_port': module.params['https_port'],
         'sandbox': module.params['sandbox'],
-        'state': module.params['state']
+        'state': module.params['state'],
+        'ssl_strong_ciphers': module.params['ssl_strong_ciphers'],
+        'tlsv1_0': module.params['tlsv1_0'],
+        'tlsv1_1': module.params['tlsv1_1'],
+        'tlsv1_2': module.params['tlsv1_2']
     }
 
-    for key, value in iteritems(obj):
-        if value:
-            validator = globals().get('validate_%s' % key)
-            if validator:
-                validator(value, module)
-
     return obj
+
 
 def main():
     """ main entry point for module execution
     """
     argument_spec = dict(
-        http=dict(aliases=['enable_http'], type='bool'),
-        http_port=dict(type='int'),
-
-        https=dict(aliases=['enable_https'], type='bool'),
-        https_port=dict(type='int'),
-
+        http=dict(aliases=['enable_http'], type='bool', default=True),
+        http_port=dict(type='int', default=80),
+        https=dict(aliases=['enable_https'], type='bool', default=False),
+        https_port=dict(type='int', default=443),
         sandbox=dict(aliases=['enable_sandbox'], type='bool'),
-
-        # deprecated (Ansible 2.3) arguments
-        config=dict(),
-
-        state=dict(default='present', choices=['started', 'stopped', 'present', 'absent'])
+        state=dict(default='present', choices=['started', 'stopped', 'present', 'absent']),
+        ssl_strong_ciphers=dict(type='bool', default=False),
+        tlsv1_0=dict(type='bool', default=True),
+        tlsv1_1=dict(type='bool', default=False),
+        tlsv1_2=dict(type='bool', default=False)
     )
 
     argument_spec.update(nxos_argument_spec)
@@ -279,18 +380,22 @@ def main():
     module = AnsibleModule(argument_spec=argument_spec,
                            supports_check_mode=True)
 
-
-    result = {'changed': False}
-
     warnings = list()
-    check_args(module, warnings)
-    result['warnings'] = warnings
+    warning_msg = "Module nxos_nxapi currently defaults to configure 'http port 80'. "
+    warning_msg += "Default behavior is changing to configure 'https port 443'"
+    warning_msg += " when params 'http, http_port, https, https_port' are not set in the playbook"
+    module.deprecate(msg=warning_msg, version="2.11")
+
+    capabilities = get_capabilities(module)
+
+    check_args(module, warnings, capabilities)
 
     want = map_params_to_obj(module)
     have = map_config_to_obj(module)
 
-    commands = map_obj_to_commands((want, have), module)
-    result['commands'] = commands
+    commands = map_obj_to_commands(want, have, module, warnings, capabilities)
+
+    result = {'changed': False, 'warnings': warnings, 'commands': commands}
 
     if commands:
         if not module.check_mode:
@@ -298,6 +403,7 @@ def main():
         result['changed'] = True
 
     module.exit_json(**result)
+
 
 if __name__ == '__main__':
     main()

@@ -1,25 +1,16 @@
 #!/usr/bin/python
 
-# LogicMonitor Ansible module for managing Collectors, Hosts and Hostgroups
 # Copyright (C) 2015  LogicMonitor
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software Foundation,
-# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -38,49 +29,39 @@ options:
         description:
             - The LogicMonitor object you wish to manage.
         required: true
-        default: null
         choices: ['host', 'hostgroup']
     company:
         description:
             - The LogicMonitor account company name. If you would log in to your account at "superheroes.logicmonitor.com" you would use "superheroes".
         required: true
-        default: null
     user:
         description:
             - A LogicMonitor user name. The module will authenticate and perform actions on behalf of this user.
         required: true
-        default: null
     password:
         description:
             - The password for the chosen LogicMonitor User.
             - If an md5 hash is used, the digest flag must be set to true.
         required: true
-        default: null
     collector:
         description:
             - The fully qualified domain name of a collector in your LogicMonitor account.
             - This is optional for querying a LogicMonitor host when a displayname is specified.
             - This is required for querying a LogicMonitor host when a displayname is not specified.
-        required: false
-        default: null
     hostname:
         description:
             - The hostname of a host in your LogicMonitor account, or the desired hostname of a device to add into monitoring.
             - Required for managing hosts (target=host).
-        required: false
         default: 'hostname -f'
     displayname:
         description:
             - The display name of a host in your LogicMonitor account or the desired display name of a device to add into monitoring.
-        required: false
         default: 'hostname -f'
     fullpath:
         description:
             - The fullpath of the hostgroup object you would like to manage.
             - Recommend running on a single ansible host.
             - Required for management of LogicMonitor host groups (target=hostgroup).
-        required: false
-        default: null
 ...
 '''
 
@@ -111,7 +92,7 @@ RETURN = '''
     ansible_facts:
         description: LogicMonitor properties set for the specified object
         returned: success
-        type: list of dicts containing name/value pairs
+        type: list
         example: >
             {
                 "name": "dc",
@@ -132,30 +113,14 @@ RETURN = '''
 ...
 '''
 
+import json
 import socket
 import types
-import urllib
 
-HAS_LIB_JSON = True
-try:
-    import json
-    # Detect the python-json library which is incompatible
-    # Look for simplejson if that's the case
-    try:
-        if (
-            not isinstance(json.loads, types.FunctionType) or
-            not isinstance(json.dumps, types.FunctionType)
-        ):
-            raise ImportError
-    except AttributeError:
-        raise ImportError
-except ImportError:
-    try:
-        import simplejson as json
-    except ImportError:
-        HAS_LIB_JSON = False
-    except SyntaxError:
-        HAS_LIB_JSON = False
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.six.moves.urllib.parse import urlencode
+from ansible.module_utils._text import to_native
+from ansible.module_utils.urls import open_url
 
 
 class LogicMonitor(object):
@@ -178,8 +143,8 @@ class LogicMonitor(object):
         and return the response"""
         self.module.debug("Running LogicMonitor.rpc")
 
-        param_str = urllib.urlencode(params)
-        creds = urllib.urlencode(
+        param_str = urlencode(params)
+        creds = urlencode(
             {"c": self.company,
                 "u": self.user,
                 "p": self.password})
@@ -206,11 +171,10 @@ class LogicMonitor(object):
                 self.fail(msg="Error: " + resp["errmsg"])
             else:
                 return raw
-        except IOError:
-            ioe = get_exception()
+        except IOError as ioe:
             self.fail(msg="Error: Exception making RPC call to " +
                           "https://" + self.company + "." + self.lm_url +
-                          "/rpc/" + action + "\nException" + str(ioe))
+                          "/rpc/" + action + "\nException" + to_native(ioe))
 
     def get_collectors(self):
         """Returns a JSON object containing a list of
@@ -221,7 +185,7 @@ class LogicMonitor(object):
         resp = self.rpc("getAgents", {})
         resp_json = json.loads(resp)
 
-        if resp_json["status"] is 200:
+        if resp_json["status"] == 200:
             self.module.debug("RPC call succeeded")
             return resp_json["data"]
         else:
@@ -248,7 +212,7 @@ class LogicMonitor(object):
 
                 for host in hosts:
                     if (host["hostName"] == hostname and
-                       host["agentId"] == collector["id"]):
+                            host["agentId"] == collector["id"]):
 
                         self.module.debug("Host match found")
                         return host
@@ -269,7 +233,7 @@ class LogicMonitor(object):
         self.module.debug("Looking for displayname " + displayname)
         self.module.debug("Making RPC call to 'getHost'")
         host_json = (json.loads(self.rpc("getHost",
-                                {"displayName": displayname})))
+                                         {"displayName": displayname})))
 
         if host_json["status"] == 200:
             self.module.debug("RPC call succeeded")
@@ -437,7 +401,7 @@ class Host(LogicMonitor):
             # Used the host information to grab the collector description
             # if not provided
             if (not hasattr(self.params, "collector") and
-               "agentDescription" in info):
+                    "agentDescription" in info):
                 self.module.debug("Setting collector from host response. " +
                                   "Collector " + info["agentDescription"])
                 self.params["collector"] = info["agentDescription"]
@@ -470,8 +434,8 @@ class Host(LogicMonitor):
         if self.info:
             self.module.debug("Making RPC call to 'getHostProperties'")
             properties_json = (json.loads(self.rpc("getHostProperties",
-                                          {'hostId': self.info["id"],
-                                           "filterSystemProperties": True})))
+                                                   {'hostId': self.info["id"],
+                                                    "filterSystemProperties": True})))
 
             if properties_json["status"] == 200:
                 self.module.debug("RPC call succeeded")
@@ -593,14 +557,8 @@ def main():
         supports_check_mode=True
     )
 
-    if HAS_LIB_JSON is not True:
-        module.fail_json(msg="Unable to load JSON library")
-
     selector(module)
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.urls import *
-from ansible.module_utils.urls import open_url
 
 if __name__ == "__main__":
     main()

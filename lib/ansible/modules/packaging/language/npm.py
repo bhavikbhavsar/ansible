@@ -1,26 +1,18 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+# Copyright (c) 2017 Chris Hoffman <christopher.hoffman@gmail.com>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# (c) 2013, Chris Hoffman <christopher.hoffman@gmail.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+
+ANSIBLE_METADATA = {
+    'metadata_version': '1.1',
+    'status': ['preview'],
+    'supported_by': 'community'
+}
+
 
 DOCUMENTATION = '''
 ---
@@ -48,7 +40,7 @@ options:
       - Install the node.js library globally
     required: false
     default: no
-    choices: [ "yes", "no" ]
+    type: bool
   executable:
     description:
       - The executable location for npm.
@@ -56,16 +48,28 @@ options:
     required: false
   ignore_scripts:
     description:
-      - Use the --ignore-scripts flag when installing.
+      - Use the C(--ignore-scripts) flag when installing.
     required: false
-    choices: [ "yes", "no" ]
+    type: bool
     default: no
     version_added: "1.8"
+  unsafe_perm:
+    description:
+      - Use the C(--unsafe-perm) flag when installing.
+    type: bool
+    default: no
+    version_added: "2.8"
+  ci:
+    description:
+      - Install packages based on package-lock file, same as running npm ci
+    type: bool
+    default: no
+    version_added: "2.8"
   production:
     description:
       - Install dependencies in production mode, excluding devDependencies
     required: false
-    choices: [ "yes", "no" ]
+    type: bool
     default: no
   registry:
     description:
@@ -78,6 +82,8 @@ options:
     required: false
     default: present
     choices: [ "present", "absent", "latest" ]
+requirements:
+    - npm installed in bin path (recommended /usr/local/bin)
 '''
 
 EXAMPLES = '''
@@ -125,15 +131,11 @@ EXAMPLES = '''
 '''
 
 import os
+import re
 
-try:
-    import json
-except ImportError:
-    try:
-        import simplejson as json
-    except ImportError:
-        # Let snippet from module_utils/basic.py return a proper error in this case
-        pass
+from ansible.module_utils.basic import AnsibleModule
+
+import json
 
 
 class Npm(object):
@@ -146,13 +148,15 @@ class Npm(object):
         self.registry = kwargs['registry']
         self.production = kwargs['production']
         self.ignore_scripts = kwargs['ignore_scripts']
+        self.unsafe_perm = kwargs['unsafe_perm']
+        self.state = kwargs['state']
 
         if kwargs['executable']:
             self.executable = kwargs['executable'].split(' ')
         else:
             self.executable = [module.get_bin_path('npm', True)]
 
-        if kwargs['version']:
+        if kwargs['version'] and self.state != 'absent':
             self.name_version = self.name + '@' + str(self.version)
         else:
             self.name_version = self.name
@@ -163,17 +167,19 @@ class Npm(object):
 
             if self.glbl:
                 cmd.append('--global')
-            if self.production:
+            if self.production and ('install' in cmd or 'update' in cmd):
                 cmd.append('--production')
             if self.ignore_scripts:
                 cmd.append('--ignore-scripts')
+            if self.unsafe_perm:
+                cmd.append('--unsafe-perm')
             if self.name:
                 cmd.append(self.name_version)
             if self.registry:
                 cmd.append('--registry')
                 cmd.append(self.registry)
 
-            #If path is specified, cd into that path and run the command.
+            # If path is specified, cd into that path and run the command.
             cwd = None
             if self.path:
                 if not os.path.exists(self.path):
@@ -187,7 +193,7 @@ class Npm(object):
         return ''
 
     def list(self):
-        cmd = ['list', '--json']
+        cmd = ['list', '--json', '--long']
 
         installed = list()
         missing = list()
@@ -202,7 +208,7 @@ class Npm(object):
                     installed.append(dep)
             if self.name and self.name not in installed:
                 missing.append(self.name)
-        #Named dependency not installed
+        # Named dependency not installed
         else:
             missing.append(self.name)
 
@@ -210,6 +216,9 @@ class Npm(object):
 
     def install(self):
         return self._exec(['install'])
+
+    def ci_install(self):
+        return self._exec(['ci'])
 
     def update(self):
         return self._exec(['update'])
@@ -224,7 +233,7 @@ class Npm(object):
             if dep:
                 # node.js v0.10.22 changed the `npm outdated` module separator
                 # from "@" to " ". Split on both for backwards compatibility.
-                pkg, other = re.split('\s|@', dep, 1)
+                pkg, other = re.split(r'\s|@', dep, 1)
                 outdated.append(pkg)
 
         return outdated
@@ -240,6 +249,8 @@ def main():
         registry=dict(default=None),
         state=dict(default='present', choices=['present', 'absent', 'latest']),
         ignore_scripts=dict(default=False, type='bool'),
+        unsafe_perm=dict(default=False, type='bool'),
+        ci=dict(default=False, type='bool'),
     )
     arg_spec['global'] = dict(default='no', type='bool')
     module = AnsibleModule(
@@ -256,31 +267,37 @@ def main():
     registry = module.params['registry']
     state = module.params['state']
     ignore_scripts = module.params['ignore_scripts']
+    unsafe_perm = module.params['unsafe_perm']
+    ci = module.params['ci']
 
     if not path and not glbl:
         module.fail_json(msg='path must be specified when not using global')
     if state == 'absent' and not name:
         module.fail_json(msg='uninstalling a package is only available for named packages')
 
-    npm = Npm(module, name=name, path=path, version=version, glbl=glbl, production=production, \
-              executable=executable, registry=registry, ignore_scripts=ignore_scripts)
+    npm = Npm(module, name=name, path=path, version=version, glbl=glbl, production=production,
+              executable=executable, registry=registry, ignore_scripts=ignore_scripts,
+              unsafe_perm=unsafe_perm, state=state)
 
     changed = False
-    if state == 'present':
+    if ci:
+        npm.ci_install()
+        changed = True
+    elif state == 'present':
         installed, missing = npm.list()
-        if len(missing):
+        if missing:
             changed = True
             npm.install()
     elif state == 'latest':
         installed, missing = npm.list()
         outdated = npm.list_outdated()
-        if len(missing):
+        if missing:
             changed = True
             npm.install()
-        if len(outdated):
+        if outdated:
             changed = True
             npm.update()
-    else: #absent
+    else:  # absent
         installed, missing = npm.list()
         if name in installed:
             changed = True
@@ -288,8 +305,6 @@ def main():
 
     module.exit_json(changed=changed)
 
-# import module snippets
-from ansible.module_utils.basic import *
 
 if __name__ == '__main__':
     main()

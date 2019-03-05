@@ -2,13 +2,19 @@
 
 from __future__ import absolute_import, print_function
 
+import collections
 import os
 import re
 import errno
 import itertools
 import abc
+import sys
 
-from lib.util import ApplicationError
+from lib.util import (
+    ApplicationError,
+    display,
+    read_lines_without_comments,
+)
 
 MODULE_EXTENSIONS = '.py', '.ps1'
 
@@ -21,12 +27,13 @@ def find_target_completion(target_func, prefix):
     """
     try:
         targets = target_func()
-        prefix = prefix.encode()
+        if sys.version_info[0] == 2:
+            prefix = prefix.encode()
         short = os.environ.get('COMP_TYPE') == '63'  # double tab completion from bash
         matches = walk_completion_targets(targets, prefix, short)
         return matches
     except Exception as ex:  # pylint: disable=locally-disabled, broad-except
-        return [str(ex)]
+        return [u'%s' % ex]
 
 
 def walk_completion_targets(targets, prefix, short=False):
@@ -207,7 +214,7 @@ def walk_compile_targets():
     """
     :rtype: collections.Iterable[TestTarget]
     """
-    return walk_test_targets(module_path='lib/ansible/modules/', extensions=('.py',))
+    return walk_test_targets(module_path='lib/ansible/modules/', extensions=('.py',), extra_dirs=('bin',))
 
 
 def walk_sanity_targets():
@@ -217,30 +224,33 @@ def walk_sanity_targets():
     return walk_test_targets(module_path='lib/ansible/modules/')
 
 
-def walk_posix_integration_targets():
+def walk_posix_integration_targets(include_hidden=False):
     """
+    :type include_hidden: bool
     :rtype: collections.Iterable[IntegrationTarget]
     """
     for target in walk_integration_targets():
-        if 'posix/' in target.aliases:
+        if 'posix/' in target.aliases or (include_hidden and 'hidden/posix/' in target.aliases):
             yield target
 
 
-def walk_network_integration_targets():
+def walk_network_integration_targets(include_hidden=False):
     """
+    :type include_hidden: bool
     :rtype: collections.Iterable[IntegrationTarget]
     """
     for target in walk_integration_targets():
-        if 'network/' in target.aliases:
+        if 'network/' in target.aliases or (include_hidden and 'hidden/network/' in target.aliases):
             yield target
 
 
-def walk_windows_integration_targets():
+def walk_windows_integration_targets(include_hidden=False):
     """
+    :type include_hidden: bool
     :rtype: collections.Iterable[IntegrationTarget]
     """
     for target in walk_integration_targets():
-        if 'windows/' in target.aliases:
+        if 'windows/' in target.aliases or (include_hidden and 'hidden/windows/' in target.aliases):
             yield target
 
 
@@ -254,7 +264,8 @@ def walk_integration_targets():
     prefixes = load_integration_prefixes()
 
     for path in paths:
-        yield IntegrationTarget(path, modules, prefixes)
+        if os.path.isdir(path):
+            yield IntegrationTarget(path, modules, prefixes)
 
 
 def load_integration_prefixes():
@@ -273,12 +284,13 @@ def load_integration_prefixes():
     return prefixes
 
 
-def walk_test_targets(path=None, module_path=None, extensions=None, prefix=None):
+def walk_test_targets(path=None, module_path=None, extensions=None, prefix=None, extra_dirs=None):
     """
     :type path: str | None
     :type module_path: str | None
     :type extensions: tuple[str] | None
     :type prefix: str | None
+    :type extra_dirs: tuple[str] | None
     :rtype: collections.Iterable[TestTarget]
     """
     for root, _, file_names in os.walk(path or '.', topdown=False):
@@ -291,7 +303,7 @@ def walk_test_targets(path=None, module_path=None, extensions=None, prefix=None)
         if path is None:
             root = root[2:]
 
-        if root.startswith('.'):
+        if root.startswith('.') and root != '.github':
             continue
 
         for file_name in file_names:
@@ -306,7 +318,124 @@ def walk_test_targets(path=None, module_path=None, extensions=None, prefix=None)
             if prefix and not name.startswith(prefix):
                 continue
 
-            yield TestTarget(os.path.join(root, file_name), module_path, prefix, path)
+            file_path = os.path.join(root, file_name)
+
+            if os.path.islink(file_path):
+                # special case to allow a symlink of ansible_release.py -> ../release.py
+                if file_path != 'lib/ansible/module_utils/ansible_release.py':
+                    continue
+
+            yield TestTarget(file_path, module_path, prefix, path)
+
+    if extra_dirs:
+        for extra_dir in extra_dirs:
+            file_names = os.listdir(extra_dir)
+
+            for file_name in file_names:
+                file_path = os.path.join(extra_dir, file_name)
+
+                if os.path.isfile(file_path) and not os.path.islink(file_path):
+                    yield TestTarget(file_path, module_path, prefix, path)
+
+
+def analyze_integration_target_dependencies(integration_targets):
+    """
+    :type integration_targets: list[IntegrationTarget]
+    :rtype: dict[str,set[str]]
+    """
+    real_target_root = os.path.realpath('test/integration/targets') + '/'
+
+    role_targets = [t for t in integration_targets if t.type == 'role']
+    hidden_role_target_names = set(t.name for t in role_targets if 'hidden/' in t.aliases)
+
+    dependencies = collections.defaultdict(set)
+
+    # handle setup dependencies
+    for target in integration_targets:
+        for setup_target_name in target.setup_always + target.setup_once:
+            dependencies[setup_target_name].add(target.name)
+
+    # handle target dependencies
+    for target in integration_targets:
+        for need_target in target.needs_target:
+            dependencies[need_target].add(target.name)
+
+    # handle symlink dependencies between targets
+    # this use case is supported, but discouraged
+    for target in integration_targets:
+        for root, _dummy, file_names in os.walk(target.path):
+            for name in file_names:
+                path = os.path.join(root, name)
+
+                if not os.path.islink(path):
+                    continue
+
+                real_link_path = os.path.realpath(path)
+
+                if not real_link_path.startswith(real_target_root):
+                    continue
+
+                link_target = real_link_path[len(real_target_root):].split('/')[0]
+
+                if link_target == target.name:
+                    continue
+
+                dependencies[link_target].add(target.name)
+
+    # intentionally primitive analysis of role meta to avoid a dependency on pyyaml
+    # script based targets are scanned as they may execute a playbook with role dependencies
+    for target in integration_targets:
+        meta_dir = os.path.join(target.path, 'meta')
+
+        if not os.path.isdir(meta_dir):
+            continue
+
+        meta_paths = sorted([os.path.join(meta_dir, name) for name in os.listdir(meta_dir)])
+
+        for meta_path in meta_paths:
+            if os.path.exists(meta_path):
+                with open(meta_path, 'r') as meta_fd:
+                    meta_lines = meta_fd.read().splitlines()
+
+                for meta_line in meta_lines:
+                    if re.search(r'^ *#.*$', meta_line):
+                        continue
+
+                    if not meta_line.strip():
+                        continue
+
+                    for hidden_target_name in hidden_role_target_names:
+                        if hidden_target_name in meta_line:
+                            dependencies[hidden_target_name].add(target.name)
+
+    while True:
+        changes = 0
+
+        for dummy, dependent_target_names in dependencies.items():
+            for dependent_target_name in list(dependent_target_names):
+                new_target_names = dependencies.get(dependent_target_name)
+
+                if new_target_names:
+                    for new_target_name in new_target_names:
+                        if new_target_name not in dependent_target_names:
+                            dependent_target_names.add(new_target_name)
+                            changes += 1
+
+        if not changes:
+            break
+
+    for target_name in sorted(dependencies):
+        consumers = dependencies[target_name]
+
+        if not consumers:
+            continue
+
+        display.info('%s:' % target_name, verbosity=4)
+
+        for consumer in sorted(consumers):
+            display.info('  %s' % consumer, verbosity=4)
+
+    return dependencies
 
 
 class CompletionTarget(object):
@@ -323,8 +452,8 @@ class CompletionTarget(object):
     def __eq__(self, other):
         if isinstance(other, CompletionTarget):
             return self.__repr__() == other.__repr__()
-        else:
-            return False
+
+        return False
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -378,7 +507,7 @@ class TestTarget(CompletionTarget):
 
         if module_path and path.startswith(module_path) and name != '__init__' and ext in MODULE_EXTENSIONS:
             self.module = name[len(module_prefix or ''):].lstrip('_')
-            self.modules = self.module,
+            self.modules = (self.module,)
         else:
             self.module = None
             self.modules = tuple()
@@ -434,16 +563,16 @@ class IntegrationTarget(CompletionTarget):
             self.script_path = os.path.join(path, runme_files[0])
         elif test_files:
             self.type = 'special'
-        elif os.path.isdir(os.path.join(path, 'tasks')):
+        elif os.path.isdir(os.path.join(path, 'tasks')) or os.path.isdir(os.path.join(path, 'defaults')):
             self.type = 'role'
         else:
-            self.type = 'unknown'
+            self.type = 'role'  # ansible will consider these empty roles, so ansible-test should as well
 
         # static_aliases
 
         try:
-            with open(os.path.join(path, 'aliases'), 'r') as aliases_file:
-                static_aliases = tuple(aliases_file.read().splitlines())
+            aliases_path = os.path.join(path, 'aliases')
+            static_aliases = tuple(read_lines_without_comments(aliases_path, remove_blank_lines=True))
         except IOError as ex:
             if ex.errno != errno.ENOENT:
                 raise
@@ -452,13 +581,13 @@ class IntegrationTarget(CompletionTarget):
         # modules
 
         if self.name in modules:
-            module = self.name
+            module_name = self.name
         elif self.name.startswith('win_') and self.name[4:] in modules:
-            module = self.name[4:]
+            module_name = self.name[4:]
         else:
-            module = None
+            module_name = None
 
-        self.modules = tuple(sorted(a for a in static_aliases + tuple([module]) if a in modules))
+        self.modules = tuple(sorted(a for a in static_aliases + tuple([module_name]) if a in modules))
 
         # groups
 
@@ -497,6 +626,11 @@ class IntegrationTarget(CompletionTarget):
         if self.type not in ('script', 'role'):
             groups.append('hidden')
 
+        # Collect file paths before group expansion to avoid including the directories.
+        # Ignore references to test targets, as those must be defined using `needs/target/*` or other target references.
+        self.needs_file = tuple(sorted(set('/'.join(g.split('/')[2:]) for g in groups if
+                                           g.startswith('needs/file/') and not g.startswith('needs/file/test/integration/targets/'))))
+
         for group in itertools.islice(groups, 0, len(groups)):
             if '/' in group:
                 parts = group.split('/')
@@ -516,6 +650,12 @@ class IntegrationTarget(CompletionTarget):
             aliases = ['hidden/'] + ['hidden/%s' % a for a in aliases if not a.startswith('hidden/')]
 
         self.aliases = tuple(sorted(set(aliases)))
+
+        # configuration
+
+        self.setup_once = tuple(sorted(set(g.split('/')[2] for g in groups if g.startswith('setup/once/'))))
+        self.setup_always = tuple(sorted(set(g.split('/')[2] for g in groups if g.startswith('setup/always/'))))
+        self.needs_target = tuple(sorted(set(g.split('/')[2] for g in groups if g.startswith('needs/target/'))))
 
 
 class TargetPatternsNotMatched(ApplicationError):

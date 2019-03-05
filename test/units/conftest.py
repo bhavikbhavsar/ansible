@@ -7,6 +7,11 @@ try:
 except ImportError:
     coverage = None
 
+try:
+    test = coverage.Coverage
+except AttributeError:
+    coverage = None
+
 
 def pytest_configure():
     if not coverage:
@@ -19,7 +24,15 @@ def pytest_configure():
             coverage_instances.append(obj)
 
     if not coverage_instances:
-        return
+        coverage_config = os.environ.get('_ANSIBLE_COVERAGE_CONFIG')
+
+        if not coverage_config:
+            return
+
+        cov = coverage.Coverage(config_file=coverage_config)
+        coverage_instances.append(cov)
+    else:
+        cov = None
 
     os_exit = os._exit
 
@@ -31,3 +44,6 @@ def pytest_configure():
         os_exit(*args, **kwargs)
 
     os._exit = coverage_exit
+
+    if cov:
+        cov.start()

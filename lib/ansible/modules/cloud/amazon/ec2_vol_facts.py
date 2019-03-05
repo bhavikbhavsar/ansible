@@ -1,21 +1,15 @@
 #!/usr/bin/python
-#
-# This is a free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This Ansible library is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this library.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -24,13 +18,13 @@ short_description: Gather facts about ec2 volumes in AWS
 description:
     - Gather facts about ec2 volumes in AWS
 version_added: "2.1"
+requirements: [ boto3 ]
 author: "Rob White (@wimnat)"
 options:
   filters:
     description:
-      - A dict of filters to apply. Each dict item consists of a filter key and a filter value. See U(http://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeVolumes.html) for possible filters.
-    required: false
-    default: null
+      - A dict of filters to apply. Each dict item consists of a filter key and a filter value.
+        See U(https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeVolumes.html) for possible filters.
 extends_documentation_fragment:
     - aws
     - ec2
@@ -63,56 +57,68 @@ EXAMPLES = '''
 # fix this
 RETURN = '''# '''
 
+import traceback
+
 try:
-    import boto.ec2
-    from boto.exception import BotoServerError
-    HAS_BOTO = True
+    from botocore.exceptions import ClientError
 except ImportError:
-    HAS_BOTO = False
+    pass  # caught by imported HAS_BOTO3
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.ec2 import connect_to_aws, ec2_argument_spec, get_aws_connection_info
+from ansible.module_utils.ec2 import ec2_argument_spec, get_aws_connection_info, boto3_conn, HAS_BOTO3, boto3_tag_list_to_ansible_dict
+from ansible.module_utils.ec2 import ansible_dict_to_boto3_filter_list, camel_dict_to_snake_dict
 
 
-def get_volume_info(volume):
+def get_volume_info(volume, region):
 
-    attachment = volume.attach_data
+    attachment = volume["attachments"]
 
     volume_info = {
-        'create_time': volume.create_time,
-        'id': volume.id,
-        'encrypted': volume.encrypted,
-        'iops': volume.iops,
-        'size': volume.size,
-        'snapshot_id': volume.snapshot_id,
-        'status': volume.status,
-        'type': volume.type,
-        'zone': volume.zone,
-        'region': volume.region.name,
+        'create_time': volume["create_time"],
+        'id': volume["volume_id"],
+        'encrypted': volume["encrypted"],
+        'iops': volume["iops"] if "iops" in volume else None,
+        'size': volume["size"],
+        'snapshot_id': volume["snapshot_id"],
+        'status': volume["state"],
+        'type': volume["volume_type"],
+        'zone': volume["availability_zone"],
+        'region': region,
         'attachment_set': {
-            'attach_time': attachment.attach_time,
-            'device': attachment.device,
-            'instance_id': attachment.instance_id,
-            'status': attachment.status
-            },
-        'tags': volume.tags
-        }
+            'attach_time': attachment[0]["attach_time"] if len(attachment) > 0 else None,
+            'device': attachment[0]["device"] if len(attachment) > 0 else None,
+            'instance_id': attachment[0]["instance_id"] if len(attachment) > 0 else None,
+            'status': attachment[0]["state"] if len(attachment) > 0 else None,
+            'delete_on_termination': attachment[0]["delete_on_termination"] if len(attachment) > 0 else None
+        },
+        'tags': boto3_tag_list_to_ansible_dict(volume['tags']) if "tags" in volume else None
+    }
 
     return volume_info
 
-def list_ec2_volumes(connection, module):
 
-    filters = module.params.get("filters")
+def describe_volumes_with_backoff(connection, filters):
+    paginator = connection.get_paginator('describe_volumes')
+    return paginator.paginate(Filters=filters).build_full_result()
+
+
+def list_ec2_volumes(connection, module, region):
+
+    # Replace filter key underscores with dashes, for compatibility, except if we're dealing with tags
+    sanitized_filters = module.params.get("filters")
+    for key in sanitized_filters:
+        if not key.startswith("tag:"):
+            sanitized_filters[key.replace("_", "-")] = sanitized_filters.pop(key)
     volume_dict_array = []
 
     try:
-        all_volumes = connection.get_all_volumes(filters=filters)
-    except BotoServerError as e:
-        module.fail_json(msg=e.message)
+        all_volumes = describe_volumes_with_backoff(connection, ansible_dict_to_boto3_filter_list(sanitized_filters))
+    except ClientError as e:
+        module.fail_json(msg=e.response, exception=traceback.format_exc())
 
-    for volume in all_volumes:
-        volume_dict_array.append(get_volume_info(volume))
-
+    for volume in all_volumes["Volumes"]:
+        volume = camel_dict_to_snake_dict(volume, ignore_list=['Tags'])
+        volume_dict_array.append(get_volume_info(volume, region))
     module.exit_json(volumes=volume_dict_array)
 
 
@@ -120,26 +126,27 @@ def main():
     argument_spec = ec2_argument_spec()
     argument_spec.update(
         dict(
-            filters = dict(default=None, type='dict')
+            filters=dict(default={}, type='dict')
         )
     )
 
     module = AnsibleModule(argument_spec=argument_spec)
 
-    if not HAS_BOTO:
-        module.fail_json(msg='boto required for this module')
+    if not HAS_BOTO3:
+        module.fail_json(msg='boto3 required for this module')
 
-    region, ec2_url, aws_connect_params = get_aws_connection_info(module)
+    region, ec2_url, aws_connect_params = get_aws_connection_info(module, boto3=True)
 
-    if region:
-        try:
-            connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, StandardError) as e:
-            module.fail_json(msg=str(e))
-    else:
-        module.fail_json(msg="region must be specified")
+    connection = boto3_conn(
+        module,
+        conn_type='client',
+        resource='ec2',
+        region=region,
+        endpoint=ec2_url,
+        **aws_connect_params
+    )
 
-    list_ec2_volumes(connection, module)
+    list_ec2_volumes(connection, module, region)
 
 
 if __name__ == '__main__':

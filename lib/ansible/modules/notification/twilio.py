@@ -2,25 +2,16 @@
 # -*- coding: utf-8 -*-
 
 # (c) 2015, Matt Makai <matthew.makai@gmail.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -47,11 +38,12 @@ options:
     description:
       the body of the text message
     required: true
-  to_number:
+  to_numbers:
     description:
       one or more phone numbers to send the text message to,
       format +15551112222
     required: true
+    aliases: [ to_number ]
   from_number:
     description:
       the Twilio number to send the text message from, format +15551112222
@@ -85,7 +77,7 @@ EXAMPLES = '''
     account_sid: ACXXXXXXXXXXXXXXXXX
     auth_token: ACXXXXXXXXXXXXXXXXX
     from_number: +15553258899
-    to_number:
+    to_numbers:
       - +15551113232
       - +12025551235
       - +19735559010
@@ -108,7 +100,9 @@ EXAMPLES = '''
 # =======================================
 # twilio module support methods
 #
-import urllib
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.six.moves.urllib.parse import urlencode
+from ansible.module_utils.urls import fetch_url
 
 
 def post_twilio_api(module, account_sid, auth_token, msg, from_number,
@@ -117,15 +111,15 @@ def post_twilio_api(module, account_sid, auth_token, msg, from_number,
         % (account_sid,)
     AGENT = "Ansible"
 
-    data = {'From':from_number, 'To':to_number, 'Body':msg}
+    data = {'From': from_number, 'To': to_number, 'Body': msg}
     if media_url:
         data['MediaUrl'] = media_url
-    encoded_data = urllib.urlencode(data)
+    encoded_data = urlencode(data)
 
     headers = {'User-Agent': AGENT,
-            'Content-type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            }
+               'Content-type': 'application/x-www-form-urlencoded',
+               'Accept': 'application/json',
+               }
 
     # Hack module params to have the Basic auth params that fetch_url expects
     module.params['url_username'] = account_sid.replace('\n', '')
@@ -146,7 +140,7 @@ def main():
             auth_token=dict(required=True, no_log=True),
             msg=dict(required=True),
             from_number=dict(required=True),
-            to_number=dict(required=True),
+            to_numbers=dict(required=True, aliases=['to_number'], type='list'),
             media_url=dict(default=None, required=False),
         ),
         supports_check_mode=True
@@ -156,26 +150,21 @@ def main():
     auth_token = module.params['auth_token']
     msg = module.params['msg']
     from_number = module.params['from_number']
-    to_number = module.params['to_number']
+    to_numbers = module.params['to_numbers']
     media_url = module.params['media_url']
 
-    if not isinstance(to_number, list):
-        to_number = [to_number]
-
-    for number in to_number:
+    for number in to_numbers:
         r, info = post_twilio_api(module, account_sid, auth_token, msg,
-                from_number, number, media_url)
+                                  from_number, number, media_url)
         if info['status'] not in [200, 201]:
             body_message = "unknown error"
             if 'body' in info:
-                body = json.loads(info['body'])
+                body = module.from_json(info['body'])
                 body_message = body['message']
             module.fail_json(msg="unable to send message to %s: %s" % (number, body_message))
 
     module.exit_json(msg=msg, changed=False)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.urls import *
+
 if __name__ == '__main__':
     main()

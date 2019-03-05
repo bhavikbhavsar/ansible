@@ -17,11 +17,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'community',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
@@ -34,33 +33,27 @@ description:
     This module can also be introspected to validate key parameters before
     returning successfully.
 extends_documentation_fragment: vyos
+notes:
+  - Tested against VYOS 1.1.7
 options:
-  hostname:
+  host_name:
     description:
-      - The new hostname to apply to the device.
-    required: false
-    default: null
+      - Configure the device hostname parameter. This option takes an ASCII string value.
   domain_name:
     description:
       - The new domain name to apply to the device.
-    required: false
-    default: null
-  name_server:
+  name_servers:
     description:
       - A list of name servers to use with the device. Mutually exclusive with
         I(domain_search)
-    required: false
-    default: null
+    aliases: ['name_server']
   domain_search:
     description:
       - A list of domain names to search. Mutually exclusive with
         I(name_server)
-    required: false
-    default: null
   state:
     description:
       - Whether to apply (C(present)) or remove (C(absent)) the settings.
-    required: false
     default: present
     choices: ['present', 'absent']
 """
@@ -78,8 +71,8 @@ commands:
 EXAMPLES = """
 - name: configure hostname and domain-name
   vyos_system:
-    hostname: vyos01
-    domain_name: foo.example.com
+    host_name: vyos01
+    domain_name: test.example.com
 
 - name: remove all configuration
   vyos_system:
@@ -87,7 +80,7 @@ EXAMPLES = """
 
 - name: configure name servers
   vyos_system:
-    name_server:
+    name_servers
       - 8.8.8.8
       - 8.8.4.4
 
@@ -99,8 +92,8 @@ EXAMPLES = """
 """
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.vyos import get_config, load_config
-from ansible.module_utils.vyos import vyos_argument_spec, check_args
+from ansible.module_utils.network.vyos.vyos import get_config, load_config
+from ansible.module_utils.network.vyos.vyos import vyos_argument_spec
 
 
 def spec_key_to_device_key(key):
@@ -168,6 +161,7 @@ def spec_to_commands(want, have):
 
     return commands
 
+
 def map_param_to_obj(module):
     return {
         'host_name': module.params['host_name'],
@@ -183,7 +177,7 @@ def main():
         host_name=dict(type='str'),
         domain_name=dict(type='str'),
         domain_search=dict(type='list'),
-        name_server=dict(type='list'),
+        name_server=dict(type='list', aliases=['name_servers']),
         state=dict(type='str', default='present', choices=['present', 'absent']),
     )
 
@@ -196,7 +190,6 @@ def main():
     )
 
     warnings = list()
-    check_args(module, warnings)
 
     result = {'changed': False, 'warnings': warnings}
 

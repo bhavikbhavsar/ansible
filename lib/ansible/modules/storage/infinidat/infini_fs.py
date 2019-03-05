@@ -1,26 +1,17 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# (c) 2016, Gregory Shulov (gregory.shulov@gmail.com)
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible. If not, see <http://www.gnu.org/licenses/>.
+# Copyright: (c) 2016, Gregory Shulov (gregory.shulov@gmail.com)
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -51,6 +42,8 @@ options:
     required: true
 extends_documentation_fragment:
     - infinibox
+requirements:
+    - capacity
 '''
 
 EXAMPLES = '''
@@ -67,15 +60,18 @@ EXAMPLES = '''
 
 RETURN = '''
 '''
+import traceback
 
-HAS_INFINISDK = True
+CAPACITY_IMP_ERR = None
 try:
-    from infinisdk import InfiniBox, core
+    from capacity import KiB, Capacity
+    HAS_CAPACITY = True
 except ImportError:
-    HAS_INFINISDK = False
+    CAPACITY_IMP_ERR = traceback.format_exc()
+    HAS_CAPACITY = False
 
-from ansible.module_utils.infinibox import *
-from capacity import KiB, Capacity
+from ansible.module_utils.basic import AnsibleModule, missing_required_lib
+from ansible.module_utils.infinibox import HAS_INFINISDK, api_wrapper, get_system, infinibox_argument_spec
 
 
 @api_wrapper
@@ -83,7 +79,7 @@ def get_pool(module, system):
     """Return Pool or None"""
     try:
         return system.pools.get(name=module.params['pool'])
-    except:
+    except Exception:
         return None
 
 
@@ -92,7 +88,7 @@ def get_filesystem(module, system):
     """Return Filesystem or None"""
     try:
         return system.filesystems.get(name=module.params['name'])
-    except:
+    except Exception:
         return None
 
 
@@ -133,31 +129,33 @@ def main():
     argument_spec = infinibox_argument_spec()
     argument_spec.update(
         dict(
-            name  = dict(required=True),
-            state = dict(default='present', choices=['present', 'absent']),
-            pool  = dict(required=True),
-            size  = dict()
+            name=dict(required=True),
+            state=dict(default='present', choices=['present', 'absent']),
+            pool=dict(required=True),
+            size=dict()
         )
     )
 
     module = AnsibleModule(argument_spec, supports_check_mode=True)
 
     if not HAS_INFINISDK:
-        module.fail_json(msg='infinisdk is required for this module')
+        module.fail_json(msg=missing_required_lib('infinisdk'))
+    if not HAS_CAPACITY:
+        module.fail_json(msg=missing_required_lib('capacity'), exception=CAPACITY_IMP_ERR)
 
     if module.params['size']:
         try:
             Capacity(module.params['size'])
-        except:
+        except Exception:
             module.fail_json(msg='size (Physical Capacity) should be defined in MB, GB, TB or PB units')
 
-    state      = module.params['state']
-    system     = get_system(module)
-    pool       = get_pool(module, system)
+    state = module.params['state']
+    system = get_system(module)
+    pool = get_pool(module, system)
     filesystem = get_filesystem(module, system)
 
     if pool is None:
-        module.fail_json(msg='Pool {} not found'.format(module.params['pool']))
+        module.fail_json(msg='Pool {0} not found'.format(module.params['pool']))
 
     if state == 'present' and not filesystem:
         create_filesystem(module, system)
@@ -169,7 +167,5 @@ def main():
         module.exit_json(changed=False)
 
 
-# Import Ansible Utilities
-from ansible.module_utils.basic import AnsibleModule
 if __name__ == '__main__':
     main()

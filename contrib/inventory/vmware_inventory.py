@@ -1,11 +1,15 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# Copyright (C): 2017, Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 # Requirements
 #   - pyvmomi >= 6.0.0.2016.4
 
 # TODO:
 #   * more jq examples
-#   * optional folder heriarchy
+#   * optional folder hierarchy
 
 """
 $ jq '._meta.hostvars[].config' data.json | head
@@ -23,42 +27,48 @@ $ jq '._meta.hostvars[].config' data.json | head
 
 from __future__ import print_function
 
-import argparse
 import atexit
 import datetime
-import getpass
-import jinja2
+import itertools
+import json
 import os
-import six
+import re
 import ssl
 import sys
 import uuid
-
-from collections import defaultdict
-from six.moves import configparser
 from time import time
 
-HAS_PYVMOMI = False
+from jinja2 import Environment
+from six import integer_types, PY3
+from six.moves import configparser
+
 try:
-    from pyVmomi import vim
+    import argparse
+except ImportError:
+    sys.exit('Error: This inventory script required "argparse" python module.  Please install it or upgrade to python-2.7')
+
+try:
+    from pyVmomi import vim, vmodl
     from pyVim.connect import SmartConnect, Disconnect
-
-    HAS_PYVMOMI = True
 except ImportError:
-    pass
+    sys.exit("ERROR: This inventory script required 'pyVmomi' Python module, it was not able to load it")
 
-try:
-    import json
-except ImportError:
-    import simplejson as json
 
-hasvcr = False
-try:
-    import vcr
+def regex_match(s, pattern):
+    '''Custom filter for regex matching'''
+    reg = re.compile(pattern)
+    if reg.match(s):
+        return True
+    else:
+        return False
 
-    hasvcr = True
-except ImportError:
-    pass
+
+def select_chain_match(inlist, key, pattern):
+    '''Get a key from a list of dicts, squash values to a single list, then filter'''
+    outlist = [x[key] for x in inlist]
+    outlist = list(itertools.chain(*outlist))
+    outlist = [x for x in outlist if regex_match(x, pattern)]
+    return outlist
 
 
 class VMwareMissingHostException(Exception):
@@ -88,11 +98,9 @@ class VMWareInventory(object):
     host_filters = []
     skip_keys = []
     groupby_patterns = []
+    groupby_custom_field_excludes = []
 
-    if sys.version_info > (3, 0):
-        safe_types = [int, bool, str, float, None]
-    else:
-        safe_types = [int, long, bool, str, float, None]
+    safe_types = [bool, str, float, None] + list(integer_types)
     iter_types = [dict, list]
 
     bad_types = ['Array', 'disabledMethod', 'declaredAlarmState']
@@ -104,15 +112,18 @@ class VMWareInventory(object):
 
     custom_fields = {}
 
+    # use jinja environments to allow for custom filters
+    env = Environment()
+    env.filters['regex_match'] = regex_match
+    env.filters['select_chain_match'] = select_chain_match
+
     # translation table for attributes to fetch for known vim types
-    if not HAS_PYVMOMI:
-        vimTable = {}
-    else:
-        vimTable = {
-            vim.Datastore: ['_moId', 'name'],
-            vim.ResourcePool: ['_moId', 'name'],
-            vim.HostSystem: ['_moId', 'name'],
-        }
+
+    vimTable = {
+        vim.Datastore: ['_moId', 'name'],
+        vim.ResourcePool: ['_moId', 'name'],
+        vim.HostSystem: ['_moId', 'name'],
+    }
 
     @staticmethod
     def _empty_inventory():
@@ -156,7 +167,6 @@ class VMWareInventory(object):
         return json.dumps(data_to_print, indent=2)
 
     def is_cache_valid(self):
-
         ''' Determines if the cache files have expired, or if it is still valid '''
 
         valid = False
@@ -170,21 +180,16 @@ class VMWareInventory(object):
         return valid
 
     def do_api_calls_update_cache(self):
-
         ''' Get instances and cache the data '''
-
         self.inventory = self.instances_to_inventory(self.get_instances())
         self.write_to_cache(self.inventory)
 
     def write_to_cache(self, data):
-
         ''' Dump inventory to json file '''
-
         with open(self.cache_path_cache, 'wb') as f:
             f.write(json.dumps(data))
 
     def get_inventory_from_cache(self):
-
         ''' Read in jsonified inventory '''
 
         jdata = None
@@ -193,7 +198,6 @@ class VMWareInventory(object):
         return json.loads(jdata)
 
     def read_settings(self):
-
         ''' Reads the settings from the vmware_inventory.ini file '''
 
         scriptbasename = __file__
@@ -222,14 +226,15 @@ class VMWareInventory(object):
                          'resourceconfig',
             'alias_pattern': '{{ config.name + "_" + config.uuid }}',
             'host_pattern': '{{ guest.ipaddress }}',
-            'host_filters': '{{ guest.gueststate == "running" }}',
+            'host_filters': '{{ runtime.powerstate == "poweredOn" }}',
             'groupby_patterns': '{{ guest.guestid }},{{ "templates" if config.template else "guests"}}',
             'lower_var_keys': True,
             'custom_field_group_prefix': 'vmware_tag_',
+            'groupby_custom_field_excludes': '',
             'groupby_custom_field': False}
         }
 
-        if six.PY3:
+        if PY3:
             config = configparser.ConfigParser()
         else:
             config = configparser.SafeConfigParser()
@@ -238,6 +243,9 @@ class VMWareInventory(object):
         vmware_ini_path = os.environ.get('VMWARE_INI_PATH', defaults['vmware']['ini_path'])
         vmware_ini_path = os.path.expanduser(os.path.expandvars(vmware_ini_path))
         config.read(vmware_ini_path)
+
+        if 'vmware' not in config.sections():
+            config.add_section('vmware')
 
         # apply defaults
         for k, v in defaults['vmware'].items():
@@ -261,7 +269,7 @@ class VMWareInventory(object):
         self.port = int(os.environ.get('VMWARE_PORT', config.get('vmware', 'port')))
         self.username = os.environ.get('VMWARE_USERNAME', config.get('vmware', 'username'))
         self.debugl('username is %s' % self.username)
-        self.password = os.environ.get('VMWARE_PASSWORD', config.get('vmware', 'password'))
+        self.password = os.environ.get('VMWARE_PASSWORD', config.get('vmware', 'password', raw=True))
         self.validate_certs = os.environ.get('VMWARE_VALIDATE_CERTS', config.get('vmware', 'validate_certs'))
         if self.validate_certs in ['no', 'false', 'False', False]:
             self.validate_certs = False
@@ -280,13 +288,29 @@ class VMWareInventory(object):
         self.debugl('lower keys is %s' % self.lowerkeys)
         self.skip_keys = list(config.get('vmware', 'skip_keys').split(','))
         self.debugl('skip keys is %s' % self.skip_keys)
-        self.host_filters = list(config.get('vmware', 'host_filters').split(','))
+        temp_host_filters = list(config.get('vmware', 'host_filters').split('}},'))
+        for host_filter in temp_host_filters:
+            host_filter = host_filter.rstrip()
+            if host_filter != "":
+                if not host_filter.endswith("}}"):
+                    host_filter += "}}"
+                self.host_filters.append(host_filter)
         self.debugl('host filters are %s' % self.host_filters)
-        self.groupby_patterns = list(config.get('vmware', 'groupby_patterns').split(','))
+
+        temp_groupby_patterns = list(config.get('vmware', 'groupby_patterns').split('}},'))
+        for groupby_pattern in temp_groupby_patterns:
+            groupby_pattern = groupby_pattern.rstrip()
+            if groupby_pattern != "":
+                if not groupby_pattern.endswith("}}"):
+                    groupby_pattern += "}}"
+                self.groupby_patterns.append(groupby_pattern)
         self.debugl('groupby patterns are %s' % self.groupby_patterns)
+        temp_groupby_custom_field_excludes = config.get('vmware', 'groupby_custom_field_excludes')
+        self.groupby_custom_field_excludes = [x.strip('"') for x in [y.strip("'") for y in temp_groupby_custom_field_excludes.split(",")]]
+        self.debugl('groupby exclude strings are %s' % self.groupby_custom_field_excludes)
 
         # Special feature to disable the brute force serialization of the
-        # virtulmachine objects. The key name for these properties does not
+        # virtual machine objects. The key name for these properties does not
         # matter because the values are just items for a larger list.
         if config.has_section('properties'):
             self.guest_props = []
@@ -297,7 +321,6 @@ class VMWareInventory(object):
         self.config = config
 
     def parse_cli_args(self):
-
         ''' Command line argument processing '''
 
         parser = argparse.ArgumentParser(description='Produce an Ansible Inventory file based on PyVmomi')
@@ -314,7 +337,6 @@ class VMWareInventory(object):
         self.args = parser.parse_args()
 
     def get_instances(self):
-
         ''' Get a list of vm instances with pyvmomi '''
         kwargs = {'host': self.server,
                   'user': self.username,
@@ -329,17 +351,23 @@ class VMWareInventory(object):
         return self._get_instances(kwargs)
 
     def _get_instances(self, inkwargs):
-
         ''' Make API calls '''
-
         instances = []
-        si = SmartConnect(**inkwargs)
+        try:
+            si = SmartConnect(**inkwargs)
+        except ssl.SSLError as connection_error:
+            if '[SSL: CERTIFICATE_VERIFY_FAILED]' in str(connection_error) and self.validate_certs:
+                sys.exit("Unable to connect to ESXi server due to %s, "
+                         "please specify validate_certs=False and try again" % connection_error)
+
+        except Exception as exc:
+            self.debugl("Unable to connect to ESXi server due to %s" % exc)
+            sys.exit("Unable to connect to ESXi server due to %s" % exc)
 
         self.debugl('retrieving all instances')
         if not si:
-            print("Could not connect to the specified host using specified "
-                  "username and password")
-            return -1
+            sys.exit("Could not connect to the specified host using specified "
+                     "username and password")
         atexit.register(Disconnect, si)
         content = si.RetrieveContent()
 
@@ -370,18 +398,22 @@ class VMWareInventory(object):
             instance_tuples.append((instance, ifacts))
         self.debugl('facts collected for all instances')
 
-        cfm = content.customFieldsManager
-        if cfm is not None and cfm.field:
-            for f in cfm.field:
-                if f.managedObjectType == vim.VirtualMachine:
-                    self.custom_fields[f.key] = f.name
-            self.debugl('%d custom fieds collected' % len(self.custom_fields))
+        try:
+            cfm = content.customFieldsManager
+            if cfm is not None and cfm.field:
+                for f in cfm.field:
+                    if not f.managedObjectType or f.managedObjectType == vim.VirtualMachine:
+                        self.custom_fields[f.key] = f.name
+                self.debugl('%d custom fields collected' % len(self.custom_fields))
+        except vmodl.RuntimeFault as exc:
+            self.debugl("Unable to gather custom fields due to %s" % exc.msg)
+        except IndexError as exc:
+            self.debugl("Unable to gather custom fields due to %s" % exc)
+
         return instance_tuples
 
     def instances_to_inventory(self, instances):
-
         ''' Convert a list of vm objects into a json compliant inventory '''
-
         self.debugl('re-indexing instances based on ini settings')
         inventory = VMWareInventory._empty_inventory()
         inventory['all'] = {}
@@ -412,7 +444,7 @@ class VMWareInventory(object):
         # Reset the inventory keys
         for k, v in name_mapping.items():
 
-            if not host_mapping or not k in host_mapping:
+            if not host_mapping or k not in host_mapping:
                 continue
 
             # set ansible_host (2.x)
@@ -467,16 +499,15 @@ class VMWareInventory(object):
             for k, v in inventory['_meta']['hostvars'].items():
                 if 'customvalue' in v:
                     for tv in v['customvalue']:
-                        if not isinstance(tv['value'], str) and not isinstance(tv['value'], unicode):
-                            continue
-
                         newkey = None
                         field_name = self.custom_fields[tv['key']] if tv['key'] in self.custom_fields else tv['key']
+                        if field_name in self.groupby_custom_field_excludes:
+                            continue
                         values = []
                         keylist = map(lambda x: x.strip(), tv['value'].split(','))
                         for kl in keylist:
                             try:
-                                newkey = self.config.get('vmware', 'custom_field_group_prefix') + field_name + '_' + kl
+                                newkey = "%s%s_%s" % (self.config.get('vmware', 'custom_field_group_prefix'), str(field_name), kl)
                                 newkey = newkey.strip()
                             except Exception as e:
                                 self.debugl(e)
@@ -493,12 +524,10 @@ class VMWareInventory(object):
         return inventory
 
     def create_template_mapping(self, inventory, pattern, dtype='string'):
-
         ''' Return a hash of uuid to templated string from pattern '''
-
         mapping = {}
         for k, v in inventory['_meta']['hostvars'].items():
-            t = jinja2.Template(pattern)
+            t = self.env.from_string(pattern)
             newkey = None
             try:
                 newkey = t.render(v)
@@ -531,7 +560,15 @@ class VMWareInventory(object):
 
             if '.' not in prop:
                 # props without periods are direct attributes of the parent
-                rdata[key] = getattr(vm, prop)
+                vm_property = getattr(vm, prop)
+                if isinstance(vm_property, vim.CustomFieldsManager.Value.Array):
+                    temp_vm_property = []
+                    for vm_prop in vm_property:
+                        temp_vm_property.append({'key': vm_prop.key,
+                                                 'value': vm_prop.value})
+                    rdata[key] = temp_vm_property
+                else:
+                    rdata[key] = vm_property
             else:
                 # props with periods are subkeys of parent attributes
                 parts = prop.split('.')
@@ -544,15 +581,27 @@ class VMWareInventory(object):
 
                 for idx, x in enumerate(parts):
 
-                    # if the val wasn't set yet, get it from the parent
-                    if not val:
-                        val = getattr(vm, x)
+                    if isinstance(val, dict):
+                        if x in val:
+                            val = val.get(x)
+                        elif x.lower() in val:
+                            val = val.get(x.lower())
                     else:
-                        # in a subkey, get the subprop from the previous attrib
-                        try:
-                            val = getattr(val, x)
-                        except AttributeError as e:
-                            self.debugl(e)
+                        # if the val wasn't set yet, get it from the parent
+                        if not val:
+                            try:
+                                val = getattr(vm, x)
+                            except AttributeError as e:
+                                self.debugl(e)
+                        else:
+                            # in a subkey, get the subprop from the previous attrib
+                            try:
+                                val = getattr(val, x)
+                            except AttributeError as e:
+                                self.debugl(e)
+
+                        # make sure it serializes
+                        val = self._process_object_types(val)
 
                     # lowercase keys if requested
                     if self.lowerkeys:
@@ -565,11 +614,17 @@ class VMWareInventory(object):
                         lastref = lastref[x]
                     else:
                         lastref[x] = val
-
+        if self.args.debug:
+            self.debugl("For %s" % vm.name)
+            for key in list(rdata.keys()):
+                if isinstance(rdata[key], dict):
+                    for ikey in list(rdata[key].keys()):
+                        self.debugl("Property '%s.%s' has value '%s'" % (key, ikey, rdata[key][ikey]))
+                else:
+                    self.debugl("Property '%s' has value '%s'" % (key, rdata[key]))
         return rdata
 
     def facts_from_vobj(self, vobj, level=0):
-
         ''' Traverse a VM object and return a json compliant data structure '''
 
         # pyvmomi objects are not yet serializable, but may be one day ...
@@ -616,7 +671,7 @@ class VMWareInventory(object):
 
         return rdata
 
-    def _process_object_types(self, vobj, thisvm=None, inkey=None, level=0):
+    def _process_object_types(self, vobj, thisvm=None, inkey='', level=0):
         ''' Serialize an object '''
         rdata = {}
 
@@ -640,11 +695,9 @@ class VMWareInventory(object):
                 rdata = vobj.decode('ascii', 'ignore')
         elif issubclass(type(vobj), bool) or isinstance(vobj, bool):
             rdata = vobj
-        elif issubclass(type(vobj), int) or isinstance(vobj, int):
+        elif issubclass(type(vobj), integer_types) or isinstance(vobj, integer_types):
             rdata = vobj
         elif issubclass(type(vobj), float) or isinstance(vobj, float):
-            rdata = vobj
-        elif issubclass(type(vobj), long) or isinstance(vobj, long):
             rdata = vobj
         elif issubclass(type(vobj), list) or issubclass(type(vobj), tuple):
             rdata = []
@@ -703,14 +756,13 @@ class VMWareInventory(object):
         return rdata
 
     def get_host_info(self, host):
-
         ''' Return hostvars for a single host '''
 
         if host in self.inventory['_meta']['hostvars']:
             return self.inventory['_meta']['hostvars'][host]
         elif self.args.host and self.inventory['_meta']['hostvars']:
             match = None
-            for k, v in self.inventory['_meta']['hostvars']:
+            for k, v in self.inventory['_meta']['hostvars'].items():
                 if self.inventory['_meta']['hostvars'][k]['name'] == self.args.host:
                     match = k
                     break
@@ -725,5 +777,3 @@ class VMWareInventory(object):
 if __name__ == "__main__":
     # Run the script
     print(VMWareInventory().show())
-
-

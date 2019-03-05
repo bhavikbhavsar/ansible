@@ -1,32 +1,20 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# (c) 2012, Matt Wright <matt@nobien.net>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
+# Copyright: (c) 2012, Matt Wright <matt@nobien.net>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'core'}
 
 DOCUMENTATION = '''
 ---
 module: pip
-short_description: Manages Python library dependencies.
+short_description: Manages Python library dependencies
 description:
      - "Manage Python library dependencies. To use this module, one of the following keys is required: C(name)
        or C(requirements)."
@@ -34,21 +22,15 @@ version_added: "0.7"
 options:
   name:
     description:
-      - The name of a Python library to install or the url of the remote package.
-      - As of 2.2 you can supply a list of names.
-    required: false
-    default: null
+      - The name of a Python library to install or the url(bzr+,hg+,git+,svn+) of the remote package.
+      - This can be a list (since 2.2) and contain version specifiers (since 2.7).
   version:
     description:
-      - The version number to install of the Python library specified in the I(name) parameter
-    required: false
-    default: null
+      - The version number to install of the Python library specified in the I(name) parameter.
   requirements:
     description:
       - The path to a pip requirements file, which should be local to the remote system.
         File can be specified as a relative path if using the chdir option.
-    required: false
-    default: null
   virtualenv:
     description:
       - An optional path to a I(virtualenv) directory to install into.
@@ -57,60 +39,51 @@ options:
         If the virtualenv does not exist, it will be created before installing
         packages. The optional virtualenv_site_packages, virtualenv_command,
         and virtualenv_python options affect the creation of the virtualenv.
-    required: false
-    default: null
   virtualenv_site_packages:
-    version_added: "1.0"
     description:
       - Whether the virtual environment will inherit packages from the
         global site-packages directory.  Note that if this setting is
         changed on an already existing virtual environment it will not
         have any effect, the environment must be deleted and newly
         created.
-    required: false
+    type: bool
     default: "no"
-    choices: [ "yes", "no" ]
+    version_added: "1.0"
   virtualenv_command:
-    version_added: "1.1"
     description:
       - The command or a pathname to the command to create the virtual
         environment with. For example C(pyvenv), C(virtualenv),
         C(virtualenv2), C(~/bin/virtualenv), C(/usr/local/bin/virtualenv).
-    required: false
     default: virtualenv
+    version_added: "1.1"
   virtualenv_python:
-    version_added: "2.0"
     description:
       - The Python executable used for creating the virtual environment.
         For example C(python3.5), C(python2.7). When not specified, the
-        Python version used to run the ansible module is used.
-    required: false
-    default: null
+        Python version used to run the ansible module is used. This parameter
+        should not be used when C(virtualenv_command) is using C(pyvenv) or
+        the C(-m venv) module.
+    version_added: "2.0"
   state:
     description:
       - The state of module
       - The 'forcereinstall' option is only available in Ansible 2.1 and above.
-    required: false
+    choices: [ absent, forcereinstall, latest, present ]
     default: present
-    choices: [ "present", "absent", "latest", "forcereinstall" ]
   extra_args:
     description:
       - Extra arguments passed to pip.
-    required: false
-    default: null
     version_added: "1.0"
   editable:
     description:
-      - Pass the editable flag for versioning URLs.
-    required: false
-    default: yes
+      - Pass the editable flag.
+    type: bool
+    default: 'no'
     version_added: "2.0"
   chdir:
     description:
       - cd into this directory before running the command
     version_added: "1.3"
-    required: false
-    default: null
   executable:
     description:
       - The explicit executable or a pathname to the executable to be used to
@@ -121,27 +94,26 @@ options:
         By default, it will take the appropriate version for the python interpreter
         use by ansible, e.g. pip3 on python 3, and pip2 or pip on python 2.
     version_added: "1.3"
-    required: false
-    default: null
   umask:
     description:
       - The system umask to apply before installing the pip package. This is
         useful, for example, when installing on systems that have a very
-        restrictive umask by default (e.g., 0077) and you want to pip install
+        restrictive umask by default (e.g., "0077") and you want to pip install
         packages which are to be used by all users. Note that this requires you
-        to specify desired umask mode in octal, with a leading 0 (e.g., 0077).
+        to specify desired umask mode as an octal string, (e.g., "0022").
     version_added: "2.1"
-    required: false
-    default: null
-
 notes:
    - Please note that virtualenv (U(http://www.virtualenv.org/)) must be
      installed on the remote host if the virtualenv parameter is specified and
      the virtualenv needs to be created.
    - By default, this module will use the appropriate version of pip for the
      interpreter used by ansible (e.g. pip3 when using python 3, pip2 otherwise)
-requirements: [ "virtualenv", "pip" ]
-author: "Matt Wright (@mattupstate)"
+requirements:
+- pip
+- virtualenv
+- setuptools
+author:
+- Matt Wright (@mattupstate)
 '''
 
 EXAMPLES = '''
@@ -151,17 +123,32 @@ EXAMPLES = '''
 
 # Install (Bottle) python package on version 0.11.
 - pip:
-    name: bottle
-    version: 0.11
+    name: bottle==0.11
+
+# Install (bottle) python package with version specifiers
+- pip:
+    name: bottle>0.10,<0.20,!=0.11
+
+# Install multi python packages with version specifiers
+- pip:
+    name:
+      - django>1.11.0,<1.12.0
+      - bottle>0.10,<0.20,!=0.11
+
+# Install python package using a proxy - it doesn't use the standard environment variables, please use the CAPITALIZED ones below
+- pip:
+    name: six
+  environment:
+    HTTP_PROXY: '127.0.0.1:8080'
+    HTTPS_PROXY: '127.0.0.1:8080'
 
 # Install (MyApp) using one of the remote protocols (bzr+,hg+,git+,svn+). You do not have to supply '-e' option in extra_args.
 - pip:
     name: svn+http://myrepo/svn/MyApp#egg=MyApp
 
-# Install MyApp using one of the remote protocols (bzr+,hg+,git+) in a non editable way.
+# Install MyApp using one of the remote protocols (bzr+,hg+,git+).
 - pip:
     name: git+http://myrepo/app/MyApp
-    editable: false
 
 # Install (MyApp) from local tarball
 - pip:
@@ -183,6 +170,11 @@ EXAMPLES = '''
     name: bottle
     virtualenv: /my_app/venv
     virtualenv_command: virtualenv-2.7
+
+# Install (Bottle) within a user home directory.
+- pip:
+    name: bottle
+    extra_args: --user
 
 # Install specified python requirements.
 - pip:
@@ -211,24 +203,118 @@ EXAMPLES = '''
 # Install (Bottle) while ensuring the umask is 0022 (to ensure other users can use it)
 - pip:
     name: bottle
-    umask: 0022
+    umask: "0022"
   become: True
 '''
 
-import tempfile
-import re
-import os
-import sys
+RETURN = '''
+cmd:
+  description: pip command used by the module
+  returned: success
+  type: str
+  sample: pip2 install ansible six
+name:
+  description: list of python modules targetted by pip
+  returned: success
+  type: list
+  sample: ['ansible', 'six']
+requirements:
+  description: Path to the requirements file
+  returned: success, if a requirements file was provided
+  type: str
+  sample: "/srv/git/project/requirements.txt"
+version:
+  description: Version of the package specified in 'name'
+  returned: success, if a name and version were provided
+  type: str
+  sample: "2.5.1"
+virtualenv:
+  description: Path to the virtualenv
+  returned: success, if a virtualenv path was provided
+  type: str
+  sample: "/tmp/virtualenv"
+'''
 
-from ansible.module_utils.basic import AnsibleModule, is_executable
+import os
+import re
+import sys
+import tempfile
+import operator
+import shlex
+import traceback
+from distutils.version import LooseVersion
+
+SETUPTOOLS_IMP_ERR = None
+try:
+    from pkg_resources import Requirement
+
+    HAS_SETUPTOOLS = True
+except ImportError:
+    HAS_SETUPTOOLS = False
+    SETUPTOOLS_IMP_ERR = traceback.format_exc()
+
+from ansible.module_utils.basic import AnsibleModule, is_executable, missing_required_lib
 from ansible.module_utils._text import to_native
 from ansible.module_utils.six import PY3
+
 
 #: Python one-liners to be run at the command line that will determine the
 # installed version for these special libraries.  These are libraries that
 # don't end up in the output of pip freeze.
 _SPECIAL_PACKAGE_CHECKERS = {'setuptools': 'import setuptools; print(setuptools.__version__)',
                              'pip': 'import pkg_resources; print(pkg_resources.get_distribution("pip").version)'}
+
+_VCS_RE = re.compile(r'(svn|git|hg|bzr)\+')
+
+op_dict = {">=": operator.ge, "<=": operator.le, ">": operator.gt,
+           "<": operator.lt, "==": operator.eq, "!=": operator.ne, "~=": operator.ge}
+
+
+def _is_vcs_url(name):
+    """Test whether a name is a vcs url or not."""
+    return re.match(_VCS_RE, name)
+
+
+def _is_package_name(name):
+    """Test whether the name is a package name or a version specifier."""
+    return not name.lstrip().startswith(tuple(op_dict.keys()))
+
+
+def _recover_package_name(names):
+    """Recover package names as list from user's raw input.
+
+    :input: a mixed and invalid list of names or version specifiers
+    :return: a list of valid package name
+
+    eg.
+    input: ['django>1.11.1', '<1.11.3', 'ipaddress', 'simpleproject>1.1.0', '<2.0.0']
+    return: ['django>1.11.1,<1.11.3', 'ipaddress', 'simpleproject>1.1.0,<2.0.0']
+
+    input: ['django>1.11.1,<1.11.3,ipaddress', 'simpleproject>1.1.0,<2.0.0']
+    return: ['django>1.11.1,<1.11.3', 'ipaddress', 'simpleproject>1.1.0,<2.0.0']
+    """
+    # rebuild input name to a flat list so we can tolerate any combination of input
+    tmp = []
+    for one_line in names:
+        tmp.extend(one_line.split(","))
+    names = tmp
+
+    # reconstruct the names
+    name_parts = []
+    package_names = []
+    in_brackets = False
+    for name in names:
+        if _is_package_name(name) and not in_brackets:
+            if name_parts:
+                package_names.append(",".join(name_parts))
+            name_parts = []
+        if "[" in name:
+            in_brackets = True
+        if in_brackets and "]" in name:
+            in_brackets = False
+        name_parts.append(name)
+    package_names.append(",".join(name_parts))
+    return package_names
 
 
 def _get_cmd_options(module, cmd):
@@ -242,19 +328,11 @@ def _get_cmd_options(module, cmd):
     return cmd_options
 
 
-def _get_full_name(name, version=None):
-    if version is None:
-        resp = name
-    else:
-        resp = name + '==' + version
-    return resp
-
-
 def _get_packages(module, pip, chdir):
     '''Return results of pip command to get packages.'''
     # Try 'pip list' command first.
-    command = '%s list' % pip
-    lang_env = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C')
+    command = '%s list --format=freeze' % pip
+    lang_env = {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}
     rc, out, err = module.run_command(command, cwd=chdir, environ_update=lang_env)
 
     # If there was an error (pip version too old) then use 'pip freeze'.
@@ -264,29 +342,19 @@ def _get_packages(module, pip, chdir):
         if rc != 0:
             _fail(module, command, out, err)
 
-    return (command, out, err)
+    return command, out, err
 
 
-def _is_present(name, version, installed_pkgs, pkg_command):
+def _is_present(module, req, installed_pkgs, pkg_command):
     '''Return whether or not package is installed.'''
     for pkg in installed_pkgs:
-        # Package listing will be different depending on which pip
-        # command was used ('pip list' vs. 'pip freeze').
-        if 'list' in pkg_command:
-            pkg = pkg.replace('(', '').replace(')', '')
-            if ',' in pkg:
-                pkg_name, pkg_version, _ = pkg.replace(',', '').split(' ')
-            else:
-                pkg_name, pkg_version = pkg.split(' ')
-        elif 'freeze' in pkg_command:
-            if '==' in pkg:
-                pkg_name, pkg_version = pkg.split('==')
-            else:
-                continue
+        if '==' in pkg:
+            pkg_name, pkg_version = pkg.split('==')
+            pkg_name = Package.canonicalize_name(pkg_name)
         else:
             continue
 
-        if pkg_name == name and (version is None or version == pkg_version):
+        if pkg_name == req.package_name and req.is_satisfied_by(pkg_version):
             return True
 
     return False
@@ -304,7 +372,6 @@ def _get_pip(module, env=None, executable=None):
 
     pip = None
     if executable is not None:
-        executable = os.path.expanduser(executable)
         if os.path.isabs(executable):
             pip = executable
         else:
@@ -323,7 +390,7 @@ def _get_pip(module, env=None, executable=None):
                 # For-else: Means that we did not break out of the loop
                 # (therefore, that pip was not found)
                 module.fail_json(msg='Unable to find any of %s to use.  pip'
-                        ' needs to be installed.' % ', '.join(candidate_pip_basenames))
+                                     ' needs to be installed.' % ', '.join(candidate_pip_basenames))
         else:
             # If we're using a virtualenv we must use the pip from the
             # virtualenv
@@ -337,10 +404,9 @@ def _get_pip(module, env=None, executable=None):
             else:
                 # For-else: Means that we did not break out of the loop
                 # (therefore, that pip was not found)
-                module.fail_json(msg='Unable to find pip in the virtualenv,'
-                        ' %s, under any of these names: %s. Make sure pip is'
-                        ' present in the virtualenv.' % (env,
-                            ', '.join(candidate_pip_basenames)))
+                module.fail_json(msg='Unable to find pip in the virtualenv, %s, ' % env +
+                                     'under any of these names: %s. ' % (', '.join(candidate_pip_basenames)) +
+                                     'Make sure pip is present in the virtualenv.')
 
     return pip
 
@@ -379,44 +445,160 @@ def _get_package_info(module, package, env=None):
     return formatted_dep
 
 
+def setup_virtualenv(module, env, chdir, out, err):
+    if module.check_mode:
+        module.exit_json(changed=True)
+
+    cmd = module.params['virtualenv_command']
+    if os.path.basename(cmd) == cmd:
+        cmd = module.get_bin_path(cmd, True)
+
+    if module.params['virtualenv_site_packages']:
+        cmd += ' --system-site-packages'
+    else:
+        cmd_opts = _get_cmd_options(module, cmd)
+        if '--no-site-packages' in cmd_opts:
+            cmd += ' --no-site-packages'
+
+    virtualenv_python = module.params['virtualenv_python']
+    # -p is a virtualenv option, not compatible with pyenv or venv
+    # this if validates if the command being used is not any of them
+    if not any(ex in module.params['virtualenv_command'] for ex in ('pyvenv', '-m venv')):
+        if virtualenv_python:
+            cmd += ' -p%s' % virtualenv_python
+        elif PY3:
+            # Ubuntu currently has a patch making virtualenv always
+            # try to use python2.  Since Ubuntu16 works without
+            # python2 installed, this is a problem.  This code mimics
+            # the upstream behaviour of using the python which invoked
+            # virtualenv to determine which python is used inside of
+            # the virtualenv (when none are specified).
+            cmd += ' -p%s' % sys.executable
+
+    # if venv or pyvenv are used and virtualenv_python is defined, then
+    # virtualenv_python is ignored, this has to be acknowledged
+    elif module.params['virtualenv_python']:
+        module.fail_json(
+            msg='virtualenv_python should not be used when'
+                ' using the venv module or pyvenv as virtualenv_command'
+        )
+
+    cmd = "%s %s" % (cmd, env)
+    rc, out_venv, err_venv = module.run_command(cmd, cwd=chdir)
+    out += out_venv
+    err += err_venv
+    if rc != 0:
+        _fail(module, cmd, out, err)
+    return out, err
+
+
+class Package:
+    """Python distribution package metadata wrapper.
+
+    A wrapper class for Requirement, which provides
+    API to parse package name, version specifier,
+    test whether a package is already satisfied.
+    """
+
+    _CANONICALIZE_RE = re.compile(r'[-_.]+')
+
+    def __init__(self, name_string, version_string=None):
+        self._plain_package = False
+        self.package_name = name_string
+        self._requirement = None
+
+        if version_string:
+            version_string = version_string.lstrip()
+            separator = '==' if version_string[0].isdigit() else ' '
+            name_string = separator.join((name_string, version_string))
+        try:
+            self._requirement = Requirement.parse(name_string)
+            # old pkg_resource will replace 'setuptools' with 'distribute' when it's already installed
+            if self._requirement.project_name == "distribute" and "setuptools" in name_string:
+                self.package_name = "setuptools"
+                self._requirement.project_name = "setuptools"
+            else:
+                self.package_name = Package.canonicalize_name(self._requirement.project_name)
+            self._plain_package = True
+        except ValueError as e:
+            pass
+
+    @property
+    def has_version_specifier(self):
+        if self._plain_package:
+            return bool(self._requirement.specs)
+        return False
+
+    def is_satisfied_by(self, version_to_test):
+        if not self._plain_package:
+            return False
+        try:
+            return self._requirement.specifier.contains(version_to_test)
+        except AttributeError:
+            # old setuptools has no specifier, do fallback
+            version_to_test = LooseVersion(version_to_test)
+            return all(
+                op_dict[op](version_to_test, LooseVersion(ver))
+                for op, ver in self._requirement.specs
+            )
+
+    @staticmethod
+    def canonicalize_name(name):
+        # This is taken from PEP 503.
+        return Package._CANONICALIZE_RE.sub("-", name).lower()
+
+    def __str__(self):
+        if self._plain_package:
+            return to_native(self._requirement)
+        return self.package_name
+
+
 def main():
     state_map = dict(
-        present='install',
-        absent='uninstall -y',
-        latest='install -U',
-        forcereinstall='install -U --force-reinstall',
+        present=['install'],
+        absent=['uninstall', '-y'],
+        latest=['install', '-U'],
+        forcereinstall=['install', '-U', '--force-reinstall'],
     )
 
     module = AnsibleModule(
         argument_spec=dict(
-            state=dict(default='present', choices=state_map.keys()),
+            state=dict(type='str', default='present', choices=state_map.keys()),
             name=dict(type='list'),
             version=dict(type='str'),
-            requirements=dict(),
+            requirements=dict(type='str'),
             virtualenv=dict(type='path'),
-            virtualenv_site_packages=dict(default=False, type='bool'),
-            virtualenv_command=dict(default='virtualenv', type='path'),
+            virtualenv_site_packages=dict(type='bool', default=False),
+            virtualenv_command=dict(type='path', default='virtualenv'),
             virtualenv_python=dict(type='str'),
-            use_mirrors=dict(default=True, type='bool'),
-            extra_args=dict(),
-            editable=dict(default=True, type='bool'),
+            use_mirrors=dict(type='bool', default=True),
+            extra_args=dict(type='str'),
+            editable=dict(type='bool', default=False),
             chdir=dict(type='path'),
-            executable=dict(),
-            umask=dict(),
+            executable=dict(type='path'),
+            umask=dict(type='str'),
         ),
         required_one_of=[['name', 'requirements']],
         mutually_exclusive=[['name', 'requirements'], ['executable', 'virtualenv']],
-        supports_check_mode=True
+        supports_check_mode=True,
     )
+
+    if not HAS_SETUPTOOLS:
+        module.fail_json(msg=missing_required_lib("setuptools"),
+                         exception=SETUPTOOLS_IMP_ERR)
 
     state = module.params['state']
     name = module.params['name']
     version = module.params['version']
     requirements = module.params['requirements']
     extra_args = module.params['extra_args']
-    virtualenv_python = module.params['virtualenv_python']
     chdir = module.params['chdir']
     umask = module.params['umask']
+    env = module.params['virtualenv']
+
+    venv_created = False
+    if env and chdir:
+        env = os.path.join(chdir, env)
 
     if umask and not isinstance(umask, int):
         try:
@@ -439,45 +621,14 @@ def main():
         err = ''
         out = ''
 
-        env = module.params['virtualenv']
-
         if env:
             if not os.path.exists(os.path.join(env, 'bin', 'activate')):
-                if module.check_mode:
-                    module.exit_json(changed=True)
-
-                cmd = module.params['virtualenv_command']
-                if os.path.basename(cmd) == cmd:
-                    cmd = module.get_bin_path(cmd, True)
-
-                if module.params['virtualenv_site_packages']:
-                    cmd += ' --system-site-packages'
-                else:
-                    cmd_opts = _get_cmd_options(module, cmd)
-                    if '--no-site-packages' in cmd_opts:
-                        cmd += ' --no-site-packages'
-
-                if virtualenv_python:
-                    cmd += ' -p%s' % virtualenv_python
-                elif PY3:
-                    # Ubuntu currently has a patch making virtualenv always
-                    # try to use python2.  Since Ubuntu16 works without
-                    # python2 installed, this is a problem.  This code mimics
-                    # the upstream behaviour of using the python which invoked
-                    # virtualenv to determine which python is used inside of
-                    # the virtualenv (when none are specified).
-                    cmd += ' -p%s' % sys.executable
-
-                cmd = "%s %s" % (cmd, env)
-                rc, out_venv, err_venv = module.run_command(cmd, cwd=chdir)
-                out += out_venv
-                err += err_venv
-                if rc != 0:
-                    _fail(module, cmd, out, err)
+                venv_created = True
+                out, err = setup_virtualenv(module, env, chdir, out, err)
 
         pip = _get_pip(module, env, module.params['executable'])
 
-        cmd = '%s %s' % (pip, state_map[state])
+        cmd = [pip] + state_map[state]
 
         # If there's a virtualenv we want things we install to be able to use other
         # installations that exist as binaries within this virtualenv. Example: we
@@ -494,11 +645,28 @@ def main():
         has_vcs = False
         if name:
             for pkg in name:
-                if bool(pkg and re.match(r'(svn|git|hg|bzr)\+', pkg)):
+                if pkg and _is_vcs_url(pkg):
                     has_vcs = True
                     break
 
-        if has_vcs and module.params['editable']:
+            # convert raw input package names to Package instances
+            packages = [Package(pkg) for pkg in _recover_package_name(name)]
+            # check invalid combination of arguments
+            if version is not None:
+                if len(packages) > 1:
+                    module.fail_json(
+                        msg="'version' argument is ambiguous when installing multiple package distributions. "
+                            "Please specify version restrictions next to each package in 'name' argument."
+                    )
+                if packages[0].has_version_specifier:
+                    module.fail_json(
+                        msg="The 'version' argument conflicts with any version specifier provided along with a package name. "
+                            "Please keep the version specifier, but remove the 'version' argument."
+                    )
+                # if the version specifier is provided by version, append that into the package
+                packages[0] = Package(to_native(packages[0]), version)
+
+        if module.params['editable']:
             args_list = []  # used if extra_args is not used at all
             if extra_args:
                 args_list = extra_args.split(' ')
@@ -508,19 +676,20 @@ def main():
                 extra_args = ' '.join(args_list)
 
         if extra_args:
-            cmd += ' %s' % extra_args
+            cmd.extend(shlex.split(extra_args))
 
         if name:
-            for pkg in name:
-                cmd += ' %s' % _get_full_name(pkg, version)
+            cmd.extend(to_native(p) for p in packages)
+        elif requirements:
+            cmd.extend(['-r', requirements])
         else:
-            if requirements:
-                cmd += ' -r %s' % requirements
+            module.exit_json(
+                changed=False,
+                warnings=["No valid name or requirements file found."],
+            )
 
         if module.check_mode:
             if extra_args or requirements or state == 'latest' or not name:
-                module.exit_json(changed=True)
-            elif has_vcs:
                 module.exit_json(changed=True)
 
             pkg_cmd, out_pip, err_pip = _get_packages(module, pip, chdir)
@@ -543,17 +712,16 @@ def main():
                                 pkg_list.append(formatted_dep)
                                 out += '%s\n' % formatted_dep
 
-                for pkg in name:
-                    is_present = _is_present(pkg, version, pkg_list, pkg_cmd)
+                for package in packages:
+                    is_present = _is_present(module, package, pkg_list, pkg_cmd)
                     if (state == 'present' and not is_present) or (state == 'absent' and is_present):
                         changed = True
                         break
             module.exit_json(changed=changed, cmd=pkg_cmd, stdout=out, stderr=err)
 
+        out_freeze_before = None
         if requirements or has_vcs:
             _, out_freeze_before, _ = _get_packages(module, pip, chdir)
-        else:
-            out_freeze_before = None
 
         rc, out_pip, err_pip = module.run_command(cmd, path_prefix=path_prefix, cwd=chdir)
         out += out_pip
@@ -570,11 +738,10 @@ def main():
             if out_freeze_before is None:
                 changed = 'Successfully installed' in out_pip
             else:
-                if out_freeze_before is None:
-                    changed = 'Successfully installed' in out_pip
-                else:
-                    _, out_freeze_after, _ = _get_packages(module, pip, chdir)
-                    changed = out_freeze_before != out_freeze_after
+                _, out_freeze_after, _ = _get_packages(module, pip, chdir)
+                changed = out_freeze_before != out_freeze_after
+
+        changed = changed or venv_created
 
         module.exit_json(changed=changed, cmd=cmd, name=name, version=version,
                          state=state, requirements=requirements, virtualenv=env,
@@ -582,6 +749,7 @@ def main():
     finally:
         if old_umask is not None:
             os.umask(old_umask)
+
 
 if __name__ == '__main__':
     main()

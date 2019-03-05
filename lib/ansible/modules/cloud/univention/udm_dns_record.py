@@ -1,34 +1,25 @@
 #!/usr/bin/python
 # -*- coding: UTF-8 -*-
 
-# Copyright (c) 2016, Adfinis SyGroup AG
+# Copyright: (c) 2016, Adfinis SyGroup AG
 # Tobias Rueetschi <tobias.ruetschi@adfinis-sygroup.ch>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
 module: udm_dns_record
 version_added: "2.2"
-author: "Tobias Rueetschi (@2-B)"
+author:
+- Tobias Rüetschi (@keachi)
 short_description: Manage dns entries on a univention corporate server
 description:
     - "This module allows to manage dns records on a univention corporate server (UCS).
@@ -81,16 +72,6 @@ EXAMPLES = '''
 
 RETURN = '''# '''
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.univention_umc import (
-    umc_module_for_add,
-    umc_module_for_edit,
-    ldap_search,
-    base_dn,
-    config,
-    uldap,
-)
-
 HAVE_UNIVENTION = False
 try:
     from univention.admin.handlers.dns import (
@@ -101,24 +82,34 @@ try:
 except ImportError:
     pass
 
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.univention_umc import (
+    umc_module_for_add,
+    umc_module_for_edit,
+    ldap_search,
+    base_dn,
+    config,
+    uldap,
+)
+
 
 def main():
     module = AnsibleModule(
-        argument_spec = dict(
-            type        = dict(required=True,
-                               type='str'),
-            zone        = dict(required=True,
-                               type='str'),
-            name        = dict(required=True,
-                               type='str'),
-            data        = dict(default=[],
-                               type='dict'),
-            state       = dict(default='present',
-                               choices=['present', 'absent'],
-                               type='str')
+        argument_spec=dict(
+            type=dict(required=True,
+                      type='str'),
+            zone=dict(required=True,
+                      type='str'),
+            name=dict(required=True,
+                      type='str'),
+            data=dict(default=[],
+                      type='dict'),
+            state=dict(default='present',
+                       choices=['present', 'absent'],
+                       type='str')
         ),
         supports_check_mode=True,
-        required_if = ([
+        required_if=([
             ('state', 'present', ['data'])
         ])
     )
@@ -126,21 +117,21 @@ def main():
     if not HAVE_UNIVENTION:
         module.fail_json(msg="This module requires univention python bindings")
 
-    type        = module.params['type']
-    zone        = module.params['zone']
-    name        = module.params['name']
-    data        = module.params['data']
-    state       = module.params['state']
-    changed     = False
+    type = module.params['type']
+    zone = module.params['zone']
+    name = module.params['name']
+    data = module.params['data']
+    state = module.params['state']
+    changed = False
 
     obj = list(ldap_search(
-        '(&(objectClass=dNSZone)(zoneName={})(relativeDomainName={}))'.format(zone, name),
+        '(&(objectClass=dNSZone)(zoneName={0})(relativeDomainName={1}))'.format(zone, name),
         attr=['dNSZone']
     ))
 
     exists = bool(len(obj))
-    container = 'zoneName={},cn=dns,{}'.format(zone, base_dn())
-    dn = 'relativeDomainName={},{}'.format(name, container)
+    container = 'zoneName={0},cn=dns,{1}'.format(zone, base_dn())
+    dn = 'relativeDomainName={0},{1}'.format(name, container)
 
     if state == 'present':
         try:
@@ -148,17 +139,17 @@ def main():
                 so = forward_zone.lookup(
                     config(),
                     uldap(),
-                    '(zone={})'.format(zone),
+                    '(zone={0})'.format(zone),
                     scope='domain',
                 ) or reverse_zone.lookup(
                     config(),
                     uldap(),
-                    '(zone={})'.format(zone),
+                    '(zone={0})'.format(zone),
                     scope='domain',
                 )
-                obj = umc_module_for_add('dns/{}'.format(type), container, superordinate=so[0])
+                obj = umc_module_for_add('dns/{0}'.format(type), container, superordinate=so[0])
             else:
-                obj = umc_module_for_edit('dns/{}'.format(type), dn)
+                obj = umc_module_for_edit('dns/{0}'.format(type), dn)
             obj['name'] = name
             for k, v in data.items():
                 obj[k] = v
@@ -169,20 +160,20 @@ def main():
                     obj.create()
                 else:
                     obj.modify()
-        except BaseException as e:
+        except Exception as e:
             module.fail_json(
-                msg='Creating/editing dns entry {} in {} failed: {}'.format(name, container, e)
+                msg='Creating/editing dns entry {0} in {1} failed: {2}'.format(name, container, e)
             )
 
     if state == 'absent' and exists:
         try:
-            obj = umc_module_for_edit('dns/{}'.format(type), dn)
+            obj = umc_module_for_edit('dns/{0}'.format(type), dn)
             if not module.check_mode:
                 obj.remove()
             changed = True
-        except BaseException as e:
+        except Exception as e:
             module.fail_json(
-                msg='Removing dns entry {} in {} failed: {}'.format(name, container, e)
+                msg='Removing dns entry {0} in {1} failed: {2}'.format(name, container, e)
             )
 
     module.exit_json(

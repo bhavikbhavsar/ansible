@@ -1,25 +1,16 @@
 #!/usr/bin/python
 #
 # Copyright 2016 Red Hat | Ansible
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -35,22 +26,22 @@ description:
 options:
   name:
     description:
-      - An image name or a list of image names. Name format will be name[:tag] or repository/name[:tag], where tag is
-        optional. If a tag is not provided, 'latest' will be used.
-    default: null
-    required: true
+      - An image name or a list of image names. Name format will be C(name[:tag]) or C(repository/name[:tag]),
+        where C(tag) is optional. If a tag is not provided, C(latest) will be used. Instead of image names, also
+        image IDs can be used.
+    type: list
+    required: yes
 
 extends_documentation_fragment:
-    - docker
+  - docker
+  - docker.docker_py_1_documentation
 
 requirements:
-  - "python >= 2.6"
-  - "docker-py >= 1.7.0"
+  - "docker-py >= 1.8.0"
   - "Docker API >= 1.20"
 
 author:
   - Chris Houseknecht (@chouseknecht)
-  - James Tanner (@jctanner)
 
 '''
 
@@ -160,14 +151,14 @@ images:
     ]
 '''
 
-from ansible.module_utils.docker_common import *
-
 try:
-    from docker import auth
     from docker import utils
 except ImportError:
-    # missing docker-py handled in docker_common
+    # missing docker-py handled in ansible.module_utils.docker.common
     pass
+
+from ansible.module_utils.docker.common import AnsibleDockerClient, DockerBaseClass, is_image_name_id
+
 
 class ImageManager(DockerBaseClass):
 
@@ -202,11 +193,15 @@ class ImageManager(DockerBaseClass):
             names = [names]
 
         for name in names:
-            repository, tag = utils.parse_repository_tag(name)
-            if not tag:
-                tag = 'latest'
-            self.log('Fetching image %s:%s' % (repository, tag))
-            image = self.client.find_image(name=repository, tag=tag)
+            if is_image_name_id(name):
+                self.log('Fetching image %s (ID)' % (name))
+                image = self.client.find_image_by_id(name)
+            else:
+                repository, tag = utils.parse_repository_tag(name)
+                if not tag:
+                    tag = 'latest'
+                self.log('Fetching image %s:%s' % (repository, tag))
+                image = self.client.find_image(name=repository, tag=tag)
             if image:
                 results.append(image)
         return results
@@ -225,11 +220,13 @@ class ImageManager(DockerBaseClass):
 
 def main():
     argument_spec = dict(
-        name=dict(type='list'),
-        )
+        name=dict(type='list', elements='str'),
+    )
 
     client = AnsibleDockerClient(
-        argument_spec=argument_spec
+        argument_spec=argument_spec,
+        supports_check_mode=True,
+        min_docker_api_version='1.20',
     )
 
     results = dict(
@@ -240,9 +237,6 @@ def main():
     ImageManager(client, results)
     client.module.exit_json(**results)
 
-
-# import module snippets
-from ansible.module_utils.basic import *
 
 if __name__ == '__main__':
     main()

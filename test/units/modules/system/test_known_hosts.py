@@ -1,10 +1,12 @@
 import os
 import tempfile
+from ansible.module_utils import basic
 
-from ansible.compat.tests import unittest
+from units.compat import unittest
 from ansible.module_utils._text import to_bytes
+from ansible.module_utils.basic import AnsibleModule
 
-from ansible.modules.system.known_hosts import compute_diff
+from ansible.modules.system.known_hosts import compute_diff, sanity_check
 
 
 class KnownHostsDiffTestCase(unittest.TestCase):
@@ -36,11 +38,8 @@ class KnownHostsDiffTestCase(unittest.TestCase):
         self.assertEqual(diff, {
             'before_header': path,
             'after_header': path,
-            'before':
-                'two.example.com ssh-rsa BBBBetc\n',
-            'after':
-                'two.example.com ssh-rsa BBBBetc\n'
-                'one.example.com ssh-rsa AAAAetc\n',
+            'before': 'two.example.com ssh-rsa BBBBetc\n',
+            'after': 'two.example.com ssh-rsa BBBBetc\none.example.com ssh-rsa AAAAetc\n',
         })
 
     def test_no_change(self):
@@ -53,12 +52,8 @@ class KnownHostsDiffTestCase(unittest.TestCase):
         self.assertEqual(diff, {
             'before_header': path,
             'after_header': path,
-            'before':
-                'one.example.com ssh-rsa AAAAetc\n'
-                'two.example.com ssh-rsa BBBBetc\n',
-            'after':
-                'one.example.com ssh-rsa AAAAetc\n'
-                'two.example.com ssh-rsa BBBBetc\n',
+            'before': 'one.example.com ssh-rsa AAAAetc\ntwo.example.com ssh-rsa BBBBetc\n',
+            'after': 'one.example.com ssh-rsa AAAAetc\ntwo.example.com ssh-rsa BBBBetc\n',
         })
 
     def test_key_change(self):
@@ -71,12 +66,8 @@ class KnownHostsDiffTestCase(unittest.TestCase):
         self.assertEqual(diff, {
             'before_header': path,
             'after_header': path,
-            'before':
-                'one.example.com ssh-rsa AAAaetc\n'
-                'two.example.com ssh-rsa BBBBetc\n',
-            'after':
-                'two.example.com ssh-rsa BBBBetc\n'
-                'one.example.com ssh-rsa AAAAetc\n',
+            'before': 'one.example.com ssh-rsa AAAaetc\ntwo.example.com ssh-rsa BBBBetc\n',
+            'after': 'two.example.com ssh-rsa BBBBetc\none.example.com ssh-rsa AAAAetc\n',
         })
 
     def test_key_removal(self):
@@ -89,11 +80,8 @@ class KnownHostsDiffTestCase(unittest.TestCase):
         self.assertEqual(diff, {
             'before_header': path,
             'after_header': path,
-            'before':
-                'one.example.com ssh-rsa AAAAetc\n'
-                'two.example.com ssh-rsa BBBBetc\n',
-            'after':
-                'two.example.com ssh-rsa BBBBetc\n',
+            'before': 'one.example.com ssh-rsa AAAAetc\ntwo.example.com ssh-rsa BBBBetc\n',
+            'after': 'two.example.com ssh-rsa BBBBetc\n',
         })
 
     def test_key_removal_no_change(self):
@@ -105,8 +93,15 @@ class KnownHostsDiffTestCase(unittest.TestCase):
         self.assertEqual(diff, {
             'before_header': path,
             'after_header': path,
-            'before':
-                'two.example.com ssh-rsa BBBBetc\n',
-            'after':
-                'two.example.com ssh-rsa BBBBetc\n',
+            'before': 'two.example.com ssh-rsa BBBBetc\n',
+            'after': 'two.example.com ssh-rsa BBBBetc\n',
         })
+
+    def test_sanity_check(self):
+        basic._load_params = lambda: {}
+        # Module used internally to execute ssh-keygen system executable
+        module = AnsibleModule(argument_spec={})
+        host = '10.0.0.1'
+        key = '%s ssh-rsa ASDF foo@bar' % (host,)
+        keygen = module.get_bin_path('ssh-keygen')
+        sanity_check(module, host, key, keygen)

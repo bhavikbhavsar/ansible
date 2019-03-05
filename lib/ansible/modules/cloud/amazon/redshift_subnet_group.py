@@ -1,23 +1,16 @@
 #!/usr/bin/python
 
 # Copyright 2014 Jens Carl, Hothead Games Inc.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -25,7 +18,7 @@ author:
   - "Jens Carl (@j-carl), Hothead Games Inc."
 module: redshift_subnet_group
 version_added: "2.2"
-short_description: mange Redshift cluster subnet groups
+short_description: manage Redshift cluster subnet groups
 description:
   - Create, modifies, and deletes Redshift cluster subnet groups.
 options:
@@ -42,17 +35,15 @@ options:
   group_description:
     description:
       - Database subnet group description.
-    required: false
-    default: null
     aliases: ['description']
   group_subnets:
     description:
       - List of subnet IDs that make up the cluster subnet group.
-    required: false
-    default: null
     aliases: ['subnets']
 requirements: [ 'boto' ]
-extends_documentation_fragment: aws
+extends_documentation_fragment:
+  - aws
+  - ec2
 '''
 
 EXAMPLES = '''
@@ -76,17 +67,17 @@ RETURN = '''
 group:
     description: dictionary containing all Redshift subnet group information
     returned: success
-    type: dictionary
+    type: complex
     contains:
         name:
             description: name of the Redshift subnet group
             returned: success
-            type: string
+            type: str
             sample: "redshift_subnet_group_name"
         vpc_id:
             description: Id of the VPC where the subnet is located
             returned: success
-            type: string
+            type: str
             sample: "vpc-aabb1122"
 '''
 
@@ -96,6 +87,9 @@ try:
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import HAS_BOTO, connect_to_aws, ec2_argument_spec, get_aws_connection_info
 
 
 def main():
@@ -127,7 +121,7 @@ def main():
 
     region, ec2_url, aws_connect_params = get_aws_connection_info(module)
     if not region:
-        module.fail_json(msg=str("region not specified and unable to determine region from EC2_REGION."))
+        module.fail_json(msg=str("Region must be specified as a parameter, in EC2_REGION or AWS_REGION environment variables or in boto configuration file"))
 
     # Connect to the Redshift endpoint.
     try:
@@ -178,9 +172,6 @@ def main():
 
     module.exit_json(changed=changed, group=group)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

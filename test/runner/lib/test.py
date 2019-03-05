@@ -4,38 +4,55 @@ from __future__ import absolute_import, print_function
 
 import datetime
 import json
+import os
 
 from lib.util import (
     display,
-    EnvironmentConfig,
+)
+
+from lib.config import (
+    TestConfig,
 )
 
 
-class TestConfig(EnvironmentConfig):
-    """Configuration common to all test commands."""
-    def __init__(self, args, command):
-        """
-        :type args: any
-        :type command: str
-        """
-        super(TestConfig, self).__init__(args, command)
+def calculate_best_confidence(choices, metadata):
+    """
+    :type choices: tuple[tuple[str, int]]
+    :type metadata: Metadata
+    :rtype: int
+    """
+    best_confidence = 0
 
-        self.coverage = args.coverage  # type: bool
-        self.include = args.include  # type: list [str]
-        self.exclude = args.exclude  # type: list [str]
-        self.require = args.require  # type: list [str]
+    for path, line in choices:
+        confidence = calculate_confidence(path, line, metadata)
+        best_confidence = max(confidence, best_confidence)
 
-        self.changed = args.changed  # type: bool
-        self.tracked = args.tracked  # type: bool
-        self.untracked = args.untracked  # type: bool
-        self.committed = args.committed  # type: bool
-        self.staged = args.staged  # type: bool
-        self.unstaged = args.unstaged  # type: bool
-        self.changed_from = args.changed_from  # type: str
-        self.changed_path = args.changed_path  # type: list [str]
+    return best_confidence
 
-        self.lint = args.lint if 'lint' in args else False  # type: bool
-        self.junit = args.junit if 'junit' in args else False  # type: bool
+
+def calculate_confidence(path, line, metadata):
+    """
+    :type path: str
+    :type line: int
+    :type metadata: Metadata
+    :rtype: int
+    """
+    ranges = metadata.changes.get(path)
+
+    # no changes were made to the file
+    if not ranges:
+        return 0
+
+    # changes were made to the same file and line
+    if any(r[0] <= line <= r[1] in r for r in ranges):
+        return 100
+
+    # changes were made to the same file and the line number is unknown
+    if line == 0:
+        return 75
+
+    # changes were made to the same file and the line number is different
+    return 50
 
 
 class TestResult(object):
@@ -144,14 +161,6 @@ class TestResult(object):
 
 class TestSuccess(TestResult):
     """Test success."""
-    def __init__(self, command, test, python_version=None):
-        """
-        :type command: str
-        :type test: str
-        :type python_version: str
-        """
-        super(TestSuccess, self).__init__(command, test, python_version)
-
     def write_junit(self, args):
         """
         :type args: TestConfig
@@ -163,14 +172,6 @@ class TestSuccess(TestResult):
 
 class TestSkipped(TestResult):
     """Test skipped."""
-    def __init__(self, command, test, python_version=None):
-        """
-        :type command: str
-        :type test: str
-        :type python_version: str
-        """
-        super(TestSkipped, self).__init__(command, test, python_version)
-
     def write_console(self):
         """Write results to console."""
         display.info('No tests applicable.', verbosity=1)
@@ -191,14 +192,28 @@ class TestFailure(TestResult):
         """
         :type command: str
         :type test: str
-        :type python_version: str
-        :type messages: list[TestMessage]
-        :type summary: str
+        :type python_version: str | None
+        :type messages: list[TestMessage] | None
+        :type summary: unicode | None
         """
         super(TestFailure, self).__init__(command, test, python_version)
 
+        if messages:
+            messages = sorted(messages, key=lambda m: m.sort_key)
+        else:
+            messages = []
+
         self.messages = messages
         self.summary = summary
+
+    def write(self, args):
+        """
+        :type args: TestConfig
+        """
+        if args.metadata.changes:
+            self.populate_confidence(args.metadata)
+
+        super(TestFailure, self).write(args)
 
     def write_console(self):
         """Write results to console."""
@@ -213,7 +228,7 @@ class TestFailure(TestResult):
             display.error('Found %d %s issue(s)%s which need to be resolved:' % (len(self.messages), self.test or self.command, specifier))
 
             for message in self.messages:
-                display.error(message)
+                display.error(message.format(show_confidence=True))
 
     def write_lint(self):
         """Write lint results to stdout."""
@@ -246,10 +261,18 @@ class TestFailure(TestResult):
         """
         :type args: TestConfig
         """
-        message = self.format_title()
+        docs = self.find_docs()
+        message = self.format_title(help_link=docs)
         output = self.format_block()
 
+        if self.messages:
+            verified = all((m.confidence or 0) >= 50 for m in self.messages)
+        else:
+            verified = False
+
         bot_data = dict(
+            verified=verified,
+            docs=docs,
             results=[
                 dict(
                     message=message,
@@ -263,9 +286,17 @@ class TestFailure(TestResult):
         if args.explain:
             return
 
-        with open(path, 'wb') as bot_fd:
+        with open(path, 'w') as bot_fd:
             json.dump(bot_data, bot_fd, indent=4, sort_keys=True)
             bot_fd.write('\n')
+
+    def populate_confidence(self, metadata):
+        """
+        :type metadata: Metadata
+        """
+        for message in self.messages:
+            if message.confidence is None:
+                message.confidence = calculate_confidence(message.path, message.line, metadata)
 
     def format_command(self):
         """
@@ -281,18 +312,43 @@ class TestFailure(TestResult):
 
         return command
 
-    def format_title(self):
+    def find_docs(self):
         """
+        :rtype: str
+        """
+        testing_docs_url = 'https://docs.ansible.com/ansible/devel/dev_guide/testing'
+        testing_docs_dir = 'docs/docsite/rst/dev_guide/testing'
+
+        url = '%s/%s/' % (testing_docs_url, self.command)
+        path = os.path.join(testing_docs_dir, self.command)
+
+        if self.test:
+            url += '%s.html' % self.test
+            path = os.path.join(path, '%s.rst' % self.test)
+
+        if os.path.exists(path):
+            return url
+
+        return None
+
+    def format_title(self, help_link=None):
+        """
+        :type help_link: str | None
         :rtype: str
         """
         command = self.format_command()
 
         if self.summary:
-            reason = 'error'
+            reason = 'the error'
         else:
-            reason = 'error' if len(self.messages) == 1 else 'errors'
+            reason = '1 error' if len(self.messages) == 1 else '%d errors' % len(self.messages)
 
-        title = 'The test `%s` failed with the following %s:' % (command, reason)
+        if help_link:
+            help_link_markup = ' [[explain](%s)]' % help_link
+        else:
+            help_link_markup = ''
+
+        title = 'The test `%s`%s failed with %s:' % (command, help_link_markup, reason)
 
         return title
 
@@ -303,7 +359,7 @@ class TestFailure(TestResult):
         if self.summary:
             block = self.summary
         else:
-            block = '\n'.join(str(m) for m in self.messages)
+            block = '\n'.join(m.format() for m in self.messages)
 
         message = block.strip()
 
@@ -315,7 +371,7 @@ class TestFailure(TestResult):
 
 class TestMessage(object):
     """Single test message for one file."""
-    def __init__(self, message, path, line=0, column=0, level='error', code=None):
+    def __init__(self, message, path, line=0, column=0, level='error', code=None, confidence=None):
         """
         :type message: str
         :type path: str
@@ -323,6 +379,7 @@ class TestMessage(object):
         :type column: int
         :type level: str
         :type code: str | None
+        :type confidence: int | None
         """
         self.path = path
         self.line = line
@@ -330,11 +387,29 @@ class TestMessage(object):
         self.level = level
         self.code = code
         self.message = message
+        self.confidence = confidence
 
     def __str__(self):
+        return self.format()
+
+    def format(self, show_confidence=False):
+        """
+        :type show_confidence: bool
+        :rtype: str
+        """
         if self.code:
             msg = '%s %s' % (self.code, self.message)
         else:
             msg = self.message
 
+        if show_confidence and self.confidence is not None:
+            msg += ' (%d%%)' % self.confidence
+
         return '%s:%s:%s: %s' % (self.path, self.line, self.column, msg)
+
+    @property
+    def sort_key(self):
+        """
+        :rtype: str
+        """
+        return '%s:%6d:%6d:%s:%s' % (self.path, self.line, self.column, self.code or '', self.message)

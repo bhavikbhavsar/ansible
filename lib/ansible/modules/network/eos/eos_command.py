@@ -16,11 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
@@ -34,6 +33,8 @@ description:
     argument that will cause the module to wait for a specific condition
     before returning or timing out if the condition is not met.
 extends_documentation_fragment: eos
+notes:
+  - Tested against EOS 4.15
 options:
   commands:
     description:
@@ -49,9 +50,9 @@ options:
         and what conditionals to apply.  This argument will cause
         the task to wait for a particular conditional to be true
         before moving forward.   If the conditional is not true
-        by the configured retries, the task fails.  See examples.
-    required: false
-    default: null
+        by the configured retries, the task fails.
+        Note - With I(wait_for) the value in C(result['stdout']) can be accessed
+        using C(result), that is to access C(result['stdout'][0]) use C(result[0]) See examples.
     aliases: ['waitfor']
     version_added: "2.2"
   match:
@@ -62,7 +63,6 @@ options:
         then all conditionals in the I(wait_for) must be satisfied.  If
         the value is set to C(any) then only one of the values must be
         satisfied.
-    required: false
     default: all
     choices: ['any', 'all']
     version_added: "2.2"
@@ -72,7 +72,6 @@ options:
         before it is considered failed.  The command is run on the
         target device every retry and evaluated against the I(wait_for)
         conditionals.
-    required: false
     default: 10
   interval:
     description:
@@ -80,7 +79,6 @@ options:
         of the command.  If the command does not pass the specified
         conditional, the interval indicates how to long to wait before
         trying the command again.
-    required: false
     default: 1
 """
 
@@ -114,60 +112,78 @@ EXAMPLES = """
     commands:
       - command: show version
         output: json
+
+- name: using cli transport, check whether the switch is in maintenance mode
+  eos_command:
+    commands: show maintenance
+    wait_for: result[0] contains 'Under Maintenance'
+
+- name: using cli transport, check whether the switch is in maintenance mode using json output
+  eos_command:
+    commands: show maintenance | json
+    wait_for: result[0].units.System.state eq 'underMaintenance'
+
+- name: "using eapi transport check whether the switch is in maintenance,
+         with 8 retries and 2 second interval between retries"
+  eos_command:
+    commands: show maintenance
+    wait_for: result[0]['units']['System']['state'] eq 'underMaintenance'
+    interval: 2
+    retries: 8
+    provider:
+      transport: eapi
 """
 
 RETURN = """
+stdout:
+  description: The set of responses from the commands
+  returned: always apart from low level errors (such as action plugin)
+  type: list
+  sample: ['...', '...']
+stdout_lines:
+  description: The value of stdout split into a list
+  returned: always apart from low level errors (such as action plugin)
+  type: list
+  sample: [['...', '...'], ['...'], ['...']]
 failed_conditions:
-  description: the conditionals that failed
+  description: The list of conditionals that have failed
   returned: failed
   type: list
   sample: ['...', '...']
 """
 import time
 
+from ansible.module_utils._text import to_text
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.pycompat24 import get_exception
-from ansible.module_utils.six import string_types
-from ansible.module_utils.netcli import Conditional
-from ansible.module_utils.network_common import ComplexList
-from ansible.module_utils.eos import run_commands
-from ansible.module_utils.eos import eos_argument_spec, check_args
+from ansible.module_utils.network.common.parsing import Conditional
+from ansible.module_utils.network.common.utils import transform_commands, to_lines
+from ansible.module_utils.network.eos.eos import run_commands
+from ansible.module_utils.network.eos.eos import eos_argument_spec
 
 VALID_KEYS = ['command', 'output', 'prompt', 'response']
 
-def to_lines(stdout):
-    lines = list()
-    for item in stdout:
-        if isinstance(item, string_types):
-            item = str(item).split('\n')
-        lines.append(item)
-    return lines
 
 def parse_commands(module, warnings):
-    spec = dict(
-        command=dict(key=True),
-        output=dict(),
-        prompt=dict(),
-        answer=dict()
-    )
+    commands = transform_commands(module)
 
-    transform = ComplexList(spec, module)
-    commands = transform(module.params['commands'])
-
-    for index, item in enumerate(commands):
-        if module.check_mode and not item['command'].startswith('show'):
-            warnings.append(
-                'Only show commands are supported when using check_mode, not '
-                'executing %s' % item['command']
-            )
+    if module.check_mode:
+        for item in list(commands):
+            if not item['command'].startswith('show'):
+                warnings.append(
+                    'Only show commands are supported when using check mode, not '
+                    'executing %s' % item['command']
+                )
+                commands.remove(item)
 
     return commands
+
 
 def to_cli(obj):
     cmd = obj['command']
     if obj.get('output') == 'json':
         cmd += ' | json'
     return cmd
+
 
 def main():
     """entry point for module execution
@@ -187,21 +203,15 @@ def main():
     module = AnsibleModule(argument_spec=argument_spec,
                            supports_check_mode=True)
 
-    result = {'changed': False}
-
     warnings = list()
-    check_args(module, warnings)
+    result = {'changed': False, 'warnings': warnings}
     commands = parse_commands(module, warnings)
-    if warnings:
-        result['warnings'] = warnings
-
     wait_for = module.params['wait_for'] or list()
 
     try:
         conditionals = [Conditional(c) for c in wait_for]
-    except AttributeError:
-        exc = get_exception()
-        module.fail_json(msg=str(exc))
+    except AttributeError as exc:
+        module.fail_json(msg=to_text(exc))
 
     retries = module.params['retries']
     interval = module.params['interval']
@@ -225,13 +235,12 @@ def main():
 
     if conditionals:
         failed_conditions = [item.raw for item in conditionals]
-        msg = 'One or more conditional statements have not be satisfied'
+        msg = 'One or more conditional statements have not been satisfied'
         module.fail_json(msg=msg, failed_conditions=failed_conditions)
 
     result.update({
-        'changed': False,
         'stdout': responses,
-        'stdout_lines': to_lines(responses)
+        'stdout_lines': list(to_lines(responses)),
     })
 
     module.exit_json(**result)

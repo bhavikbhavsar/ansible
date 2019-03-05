@@ -1,98 +1,90 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-"""
-Ansible module to manage symbolic link alternatives.
-(c) 2014, Gabe Mulley <gabe.mulley@gmail.com>
-(c) 2015, David Wittman <dwittman@gmail.com>
+# Copyright: (c) 2014, Gabe Mulley <gabe.mulley@gmail.com>
+# Copyright: (c) 2015, David Wittman <dwittman@gmail.com>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-This file is part of Ansible
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
-Ansible is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
 
-Ansible is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
 
-You should have received a copy of the GNU General Public License
-along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-"""
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
-
-DOCUMENTATION = '''
+DOCUMENTATION = r'''
 ---
 module: alternatives
 short_description: Manages alternative programs for common commands
 description:
-    - Manages symbolic links using the 'update-alternatives' tool
+    - Manages symbolic links using the 'update-alternatives' tool.
     - Useful when multiple programs are installed but provide similar functionality (e.g. different editors).
 version_added: "1.6"
 author:
-    - "David Wittman (@DavidWittman)"
-    - "Gabe Mulley (@mulby)"
+    - David Wittman (@DavidWittman)
+    - Gabe Mulley (@mulby)
 options:
   name:
     description:
       - The generic name of the link.
+    type: str
     required: true
   path:
     description:
       - The path to the real executable that the link should point to.
+    type: path
     required: true
   link:
     description:
       - The path to the symbolic link that should point to the real executable.
-      - This option is required on RHEL-based distributions
-    required: false
+      - This option is always required on RHEL-based distributions. On Debian-based distributions this option is
+        required when the alternative I(name) is unknown to the system.
+    type: path
   priority:
     description:
-      - The priority of the alternative
-    required: false
+      - The priority of the alternative.
+    type: int
     default: 50
     version_added: "2.2"
 requirements: [ update-alternatives ]
 '''
 
-EXAMPLES = '''
-- name: correct java version selected
+EXAMPLES = r'''
+- name: Correct java version selected
   alternatives:
     name: java
     path: /usr/lib/jvm/java-7-openjdk-amd64/jre/bin/java
 
-- name: alternatives link created
+- name: Alternatives link created
   alternatives:
     name: hadoop-conf
     link: /etc/hadoop/conf
     path: /etc/hadoop/conf.ansible
 
-- name: make java 32 bit an alternative with low priority
+- name: Make java 32 bit an alternative with low priority
   alternatives:
     name: java
     path: /usr/lib/jvm/java-7-openjdk-i386/jre/bin/java
     priority: -10
 '''
 
+import os
 import re
-from ansible.module_utils.basic import *
-from ansible.module_utils.pycompat24 import get_exception
+import subprocess
+
+from ansible.module_utils.basic import AnsibleModule
 
 
 def main():
 
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            path = dict(required=True, type='path'),
-            link = dict(required=False, type='path'),
-            priority = dict(required=False, type='int',
-                            default=50),
+        argument_spec=dict(
+            name=dict(type='str', required=True),
+            path=dict(type='path', required=True),
+            link=dict(type='path'),
+            priority=dict(type='int', default=50),
         ),
         supports_check_mode=True,
     )
@@ -103,7 +95,7 @@ def main():
     link = params['link']
     priority = params['priority']
 
-    UPDATE_ALTERNATIVES = module.get_bin_path('update-alternatives',True)
+    UPDATE_ALTERNATIVES = module.get_bin_path('update-alternatives', True)
 
     current_path = None
     all_alternatives = []
@@ -121,7 +113,9 @@ def main():
                                         re.MULTILINE)
         alternative_regex = re.compile(r'^(\/.*)\s-\spriority', re.MULTILINE)
 
-        current_path = current_path_regex.search(display_output).group(1)
+        match = current_path_regex.search(display_output)
+        if match:
+            current_path = match.group(1)
         all_alternatives = alternative_regex.findall(display_output)
 
         if not link:
@@ -145,6 +139,8 @@ def main():
         try:
             # install the requested path if necessary
             if path not in all_alternatives:
+                if not os.path.exists(path):
+                    module.fail_json(msg="Specified path %s does not exist" % path)
                 if not link:
                     module.fail_json(msg="Needed to install the alternative, but unable to do so as we are missing the link")
 
@@ -160,11 +156,11 @@ def main():
             )
 
             module.exit_json(changed=True)
-        except subprocess.CalledProcessError:
-            e = get_exception()
+        except subprocess.CalledProcessError as cpe:
             module.fail_json(msg=str(dir(cpe)))
     else:
         module.exit_json(changed=False)
+
 
 if __name__ == '__main__':
     main()

@@ -23,25 +23,22 @@ from yaml.constructor import SafeConstructor, ConstructorError
 from yaml.nodes import MappingNode
 
 from ansible.module_utils._text import to_bytes
-from ansible.parsing.vault import VaultLib
 from ansible.parsing.yaml.objects import AnsibleMapping, AnsibleSequence, AnsibleUnicode
 from ansible.parsing.yaml.objects import AnsibleVaultEncryptedUnicode
-from ansible.vars.unsafe_proxy import wrap_var
+from ansible.utils.unsafe_proxy import wrap_var
+from ansible.parsing.vault import VaultLib
+from ansible.utils.display import Display
 
-try:
-    from __main__ import display
-except ImportError:
-    from ansible.utils.display import Display
-    display = Display()
+display = Display()
 
 
 class AnsibleConstructor(SafeConstructor):
-    def __init__(self, file_name=None, b_vault_password=None):
-        self._b_vault_password = b_vault_password
+    def __init__(self, file_name=None, vault_secrets=None):
         self._ansible_file_name = file_name
         super(AnsibleConstructor, self).__init__()
         self._vaults = {}
-        self._vaults['default'] = VaultLib(b_password=self._b_vault_password)
+        self.vault_secrets = vault_secrets or []
+        self._vaults['default'] = VaultLib(secrets=self.vault_secrets)
 
     def construct_yaml_map(self, node):
         data = AnsibleMapping()
@@ -56,8 +53,8 @@ class AnsibleConstructor(SafeConstructor):
         # (pyyaml silently allows overwriting keys)
         if not isinstance(node, MappingNode):
             raise ConstructorError(None, None,
-                    "expected a mapping node, but found %s" % node.id,
-                    node.start_mark)
+                                   "expected a mapping node, but found %s" % node.id,
+                                   node.start_mark)
         self.flatten_mapping(node)
         mapping = AnsibleMapping()
 
@@ -70,18 +67,18 @@ class AnsibleConstructor(SafeConstructor):
                 hash(key)
             except TypeError as exc:
                 raise ConstructorError("while constructing a mapping", node.start_mark,
-                        "found unacceptable key (%s)" % exc, key_node.start_mark)
+                                       "found unacceptable key (%s)" % exc, key_node.start_mark)
 
             if key in mapping:
                 display.warning(u'While constructing a mapping from {1}, line {2}, column {3}, found a duplicate dict key ({0}).'
-                u' Using last defined value only.'.format(key, *mapping.ansible_pos))
+                                u' Using last defined value only.'.format(key, *mapping.ansible_pos))
 
             value = self.construct_object(value_node, deep=deep)
             mapping[key] = value
 
         return mapping
 
-    def construct_yaml_str(self, node, unsafe=False):
+    def construct_yaml_str(self, node):
         # Override the default string handling function
         # to always return unicode objects
         value = self.construct_scalar(node)
@@ -89,22 +86,20 @@ class AnsibleConstructor(SafeConstructor):
 
         ret.ansible_pos = self._node_position_info(node)
 
-        if unsafe:
-            ret = wrap_var(ret)
-
         return ret
 
     def construct_vault_encrypted_unicode(self, node):
         value = self.construct_scalar(node)
-        ciphertext_data = to_bytes(value)
-
-        if self._b_vault_password is None:
-            raise ConstructorError(None, None,
-                    "found vault but no vault password provided", node.start_mark)
-
+        b_ciphertext_data = to_bytes(value)
         # could pass in a key id here to choose the vault to associate with
+        # TODO/FIXME: plugin vault selector
         vault = self._vaults['default']
-        ret = AnsibleVaultEncryptedUnicode(ciphertext_data)
+        if vault.secrets is None:
+            raise ConstructorError(context=None, context_mark=None,
+                                   problem="found !vault but no vault password provided",
+                                   problem_mark=node.start_mark,
+                                   note=None)
+        ret = AnsibleVaultEncryptedUnicode(b_ciphertext_data)
         ret.vault = vault
         return ret
 
@@ -115,7 +110,7 @@ class AnsibleConstructor(SafeConstructor):
         data.ansible_pos = self._node_position_info(node)
 
     def construct_yaml_unsafe(self, node):
-        return self.construct_yaml_str(node, unsafe=True)
+        return wrap_var(self.construct_yaml_str(node))
 
     def _node_position_info(self, node):
         # the line number where the previous token has ended (plus empty lines)
@@ -159,3 +154,5 @@ AnsibleConstructor.add_constructor(
 AnsibleConstructor.add_constructor(
     u'!vault',
     AnsibleConstructor.construct_vault_encrypted_unicode)
+
+AnsibleConstructor.add_constructor(u'!vault-encrypted', AnsibleConstructor.construct_vault_encrypted_unicode)

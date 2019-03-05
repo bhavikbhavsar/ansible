@@ -1,23 +1,16 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 
@@ -28,7 +21,7 @@ description:
 version_added: "1.2"
 author:
     - "Dylan Silva (@thaumos)"
-    - "Justin Johns"
+    - "Justin Johns (!UNKNOWN)"
 requirements:
     - "This pingdom python library: https://github.com/mbabineau/pingdom-python"
 options:
@@ -36,37 +29,23 @@ options:
         description:
             - Define whether or not the check should be running or paused.
         required: true
-        default: null
         choices: [ "running", "paused" ]
-        aliases: []
     checkid:
         description:
             - Pingdom ID of the check.
         required: true
-        default: null
-        choices: []
-        aliases: []
     uid:
         description:
             - Pingdom user ID.
         required: true
-        default: null
-        choices: []
-        aliases: []
     passwd:
         description:
             - Pingdom user password.
         required: true
-        default: null
-        choices: []
-        aliases: []
     key:
         description:
             - Pingdom API key.
         required: true
-        default: null
-        choices: []
-        aliases: []
 notes:
     - This module does not yet have support to add/remove checks.
 '''
@@ -89,12 +68,17 @@ EXAMPLES = '''
     state: running
 '''
 
+import traceback
+
+PINGDOM_IMP_ERR = None
 try:
     import pingdom
     HAS_PINGDOM = True
-except:
+except Exception:
+    PINGDOM_IMP_ERR = traceback.format_exc()
     HAS_PINGDOM = False
 
+from ansible.module_utils.basic import AnsibleModule, missing_required_lib
 
 
 def pause(checkid, uid, passwd, key):
@@ -104,7 +88,7 @@ def pause(checkid, uid, passwd, key):
     check = c.get_check(checkid)
     name = check.name
     result = check.status
-    #if result != "paused":             # api output buggy - accept raw exception for now
+    # if result != "paused":             # api output buggy - accept raw exception for now
     #    return (True, name, result)
     return (False, name, result)
 
@@ -116,7 +100,7 @@ def unpause(checkid, uid, passwd, key):
     check = c.get_check(checkid)
     name = check.name
     result = check.status
-    #if result != "up":                 # api output buggy - accept raw exception for now
+    # if result != "up":                 # api output buggy - accept raw exception for now
     #    return (True, name, result)
     return (False, name, result)
 
@@ -134,7 +118,7 @@ def main():
     )
 
     if not HAS_PINGDOM:
-        module.fail_json(msg="Missing required pingdom module (check docs)")
+        module.fail_json(msg=missing_required_lib("pingdom"), exception=PINGDOM_IMP_ERR)
 
     checkid = module.params['checkid']
     state = module.params['state']
@@ -153,8 +137,6 @@ def main():
 
     module.exit_json(checkid=checkid, name=name, status=result)
 
-# import module snippets
-from ansible.module_utils.basic import *
 
 if __name__ == '__main__':
     main()

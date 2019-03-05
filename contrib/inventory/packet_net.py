@@ -55,18 +55,16 @@ except ImportError as e:
 import traceback
 
 
-try:
-    import json
-except ImportError:
-    import simplejson as json
+import json
 
 
 ini_section = 'packet'
 
+
 class PacketInventory(object):
 
     def _empty_inventory(self):
-        return {"_meta" : {"hostvars" : {}}}
+        return {"_meta": {"hostvars": {}}}
 
     def __init__(self):
         ''' Main execution path '''
@@ -100,7 +98,6 @@ class PacketInventory(object):
                 data_to_print = self.json_format_dict(self.inventory, True)
 
         print(data_to_print)
-
 
     def is_cache_valid(self):
         ''' Determines if the cache files have expired, or if it is still valid '''
@@ -175,6 +172,7 @@ class PacketInventory(object):
         # Configure which groups should be created.
         group_by_options = [
             'group_by_device_id',
+            'group_by_hostname',
             'group_by_facility',
             'group_by_project',
             'group_by_operating_system',
@@ -224,13 +222,12 @@ class PacketInventory(object):
 
         parser = argparse.ArgumentParser(description='Produce an Ansible Inventory file based on Packet')
         parser.add_argument('--list', action='store_true', default=True,
-                           help='List Devices (default: True)')
+                            help='List Devices (default: True)')
         parser.add_argument('--host', action='store',
-                           help='Get all the variables about a specific device')
+                            help='Get all the variables about a specific device')
         parser.add_argument('--refresh-cache', action='store_true', default=False,
-                           help='Force refresh of cache by making API requests to Packet (default: False - use cache files)')
+                            help='Force refresh of cache by making API requests to Packet (default: False - use cache files)')
         self.args = parser.parse_args()
-
 
     def do_api_calls_update_cache(self):
         ''' Do API calls to each region, and save data in cache files '''
@@ -244,7 +241,7 @@ class PacketInventory(object):
 
     def connect(self):
         ''' create connection to api server'''
-        token=os.environ.get('PACKET_API_TOKEN')
+        token = os.environ.get('PACKET_API_TOKEN')
         if token is None:
             raise Exception("Error reading token from environment (PACKET_API_TOKEN)!")
         manager = packet.Manager(auth_token=token)
@@ -270,7 +267,7 @@ class PacketInventory(object):
 
         try:
             manager = self.connect()
-            devices = manager.list_devices(project_id=project.id, params = params)
+            devices = manager.list_devices(project_id=project.id, params=params)
 
             for device in devices:
                 self.add_device(device, project)
@@ -301,12 +298,16 @@ class PacketInventory(object):
         if device.state not in self.packet_device_states:
             return
 
-        # Select the best destination address
+        # Select the best destination address. Only include management
+        # addresses as non-management (elastic) addresses need manual
+        # host configuration to be routable.
+        # See https://help.packet.net/article/54-elastic-ips.
         dest = None
         for ip_address in device.ip_addresses:
-            if ip_address['public'] is True and ip_address['address_family'] == 4:
+            if ip_address['public'] is True and \
+               ip_address['address_family'] == 4 and \
+               ip_address['management'] is True:
                 dest = ip_address['address']
-
 
         if not dest:
             # Skip devices we cannot address (e.g. private VPC subnet)
@@ -328,6 +329,12 @@ class PacketInventory(object):
             self.inventory[device.id] = [dest]
             if self.nested_groups:
                 self.push_group(self.inventory, 'devices', device.id)
+
+        # Inventory: Group by device name (hopefully a group of 1)
+        if self.group_by_hostname:
+            self.push(self.inventory, device.hostname, dest)
+            if self.nested_groups:
+                self.push_group(self.inventory, 'hostnames', project.name)
 
         # Inventory: Group by project
         if self.group_by_project:
@@ -373,7 +380,6 @@ class PacketInventory(object):
 
         self.inventory["_meta"]["hostvars"][dest] = self.get_host_info_dict_from_device(device)
 
-
     def get_host_info_dict_from_device(self, device):
         device_vars = {}
         for key in vars(device):
@@ -385,7 +391,7 @@ class PacketInventory(object):
                 device_vars[key] = device.state or ''
             elif key == 'packet_hostname':
                 device_vars[key] = value
-            elif type(value) in [int, bool]:
+            elif isinstance(value, (int, bool)):
                 device_vars[key] = value
             elif isinstance(value, six.string_types):
                 device_vars[key] = value.strip()
@@ -403,9 +409,9 @@ class PacketInventory(object):
                     device_vars[key] = k
             else:
                 pass
-                #print key
-                #print type(value)
-                #print value
+                # print key
+                # print type(value)
+                # print value
 
         return device_vars
 
@@ -416,10 +422,10 @@ class PacketInventory(object):
             # Need to load index from cache
             self.load_index_from_cache()
 
-        if not self.args.host in self.index:
+        if self.args.host not in self.index:
             # try updating the cache
             self.do_api_calls_update_cache()
-            if not self.args.host in self.index:
+            if self.args.host not in self.index:
                 # host might not exist anymore
                 return self.json_format_dict({}, True)
 
@@ -455,14 +461,12 @@ class PacketInventory(object):
         json_inventory = cache.read()
         return json_inventory
 
-
     def load_index_from_cache(self):
         ''' Reads the index from the cache file sets self.index '''
 
         cache = open(self.cache_path_index, 'r')
         json_index = cache.read()
         self.index = json.loads(json_index)
-
 
     def write_to_cache(self, data, filename):
         ''' Writes data in JSON format to a file '''
@@ -478,9 +482,9 @@ class PacketInventory(object):
 
     def to_safe(self, word):
         ''' Converts 'bad' characters in a string to underscores so they can be used as Ansible groups '''
-        regex = "[^A-Za-z0-9\_"
+        regex = r"[^A-Za-z0-9\_"
         if not self.replace_dash_in_groups:
-            regex += "\-"
+            regex += r"\-"
         return re.sub(regex + "]", "_", word)
 
     def json_format_dict(self, data, pretty=False):

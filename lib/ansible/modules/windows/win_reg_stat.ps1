@@ -1,32 +1,18 @@
 #!powershell
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# WANT_JSON
-# POWERSHELL_COMMON
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+#Requires -Module Ansible.ModuleUtils.Legacy
 
 $ErrorActionPreference = "Stop"
 
-$params = Parse-Args $args -supports_check_mode $true
+$params = Parse-Args -arguments $args -supports_check_mode $true
 
-$key = Get-AnsibleParam -obj $params -name "key" -type "str" -failifempty $true
-$property = Get-AnsibleParam -obj $params -name "property" -type "str"
+$path = Get-AnsibleParam -obj $params -name "path" -type "str" -failifempty $true -aliases "key"
+$name = Get-AnsibleParam -obj $params -name "name" -type "str" -aliases "entry","value"
 
 $result = @{
     changed = $false
-    win_reg_stat = @{}
 }
 
 Function Get-NetHiveName($hive) {
@@ -70,7 +56,7 @@ Function Get-PropertyObject($hive, $net_hive, $path, $property) {
         $raw_value = $value
     }
 
-    $object = New-Object PSObject @{
+    $object = @{
         raw_value = $raw_value
         value = $value
         type = $type
@@ -94,57 +80,57 @@ Function Test-RegistryProperty($hive, $path, $property) {
 }
 
 # Will validate the key parameter to make sure it matches known format
-if ($key -match "^([a-zA-Z_]*):\\(.*)$") {
+if ($path -match "^([a-zA-Z_]*):\\(.*)$") {
     $hive = $matches[1]
-    $path = $matches[2]
+    $reg_path = $matches[2]
 } else {
-    Fail-Json $result "key does not match format 'HIVE:\KEY_PATH'"
+    Fail-Json $result "path does not match format 'HIVE:\KEY_PATH'"
 }
 
 # Used when getting the actual REG_EXPAND_SZ value as well as checking the hive is a known value
 $net_hive = Get-NetHiveName -hive $hive
 if ($net_hive -eq 'unsupported') {
-    Fail-Json $result "the hive in key is '$hive'; must be 'HKCR', 'HKCC', 'HKCU', 'HKLM' or 'HKU'"
+    Fail-Json $result "the hive in path is '$hive'; must be 'HKCR', 'HKCC', 'HKCU', 'HKLM' or 'HKU'"
 }
 
-if (Test-Path REGISTRY::$hive\$path) {
-    if ($property -eq $null) {
+if (Test-Path REGISTRY::$hive\$reg_path) {
+    if ($name -eq $null) {
         $property_info = @{}
-        $properties = Get-ItemProperty REGISTRY::$hive\$path
+        $properties = Get-ItemProperty REGISTRY::$hive\$reg_path
 
         foreach ($property in $properties.PSObject.Properties) {
             # Powershell adds in some metadata we need to filter out
-            $real_property = Test-RegistryProperty -hive $hive -path $path -property $property.Name
+            $real_property = Test-RegistryProperty -hive $hive -path $reg_path -property $property.Name
             if ($real_property -eq $true) {
-                $property_object = Get-PropertyObject -hive $hive -net_hive $net_hive -path $path -property $property.Name 
+                $property_object = Get-PropertyObject -hive $hive -net_hive $net_hive -path $reg_path -property $property.Name 
                 $property_info.Add($property.Name, $property_object)
             }
         }
 
         $sub_keys = @()
-        $sub_keys_raw = Get-ChildItem REGISTRY::$hive\$path -ErrorAction SilentlyContinue
+        $sub_keys_raw = Get-ChildItem REGISTRY::$hive\$reg_path -ErrorAction SilentlyContinue
 
         foreach ($sub_key in $sub_keys_raw) {
             $sub_keys += $sub_key.PSChildName
         }
 
-        $result.win_reg_stat.exists = $true
-        $result.win_reg_stat.sub_keys = $sub_keys
-        $result.win_reg_stat.properties = $property_info
+        $result.exists = $true
+        $result.sub_keys = $sub_keys
+        $result.properties = $property_info
     } else {
-        $exists = Test-RegistryProperty -hive $hive -path $path -property $property
+        $exists = Test-RegistryProperty -hive $hive -path $reg_path -property $name
         if ($exists -eq $true) {
-            $propertyObject = Get-PropertyObject -hive $hive -net_hive $net_hive -path $path -property $property
-            $result.win_reg_stat.exists = $true
-            $result.win_reg_stat.raw_value = $propertyObject.raw_value
-            $result.win_reg_stat.value = $propertyObject.value
-            $result.win_reg_stat.type = $propertyObject.type
+            $propertyObject = Get-PropertyObject -hive $hive -net_hive $net_hive -path $reg_path -property $name
+            $result.exists = $true
+            $result.raw_value = $propertyObject.raw_value
+            $result.value = $propertyObject.value
+            $result.type = $propertyObject.type
         } else {
-            $result.win_reg_stat.exists = $false
+            $result.exists = $false
         }
     }
 } else {
-    $result.win_reg_stat.exists = $false
+    $result.exists = $false
 }
 
 Exit-Json $result

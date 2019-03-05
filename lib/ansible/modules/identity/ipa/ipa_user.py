@@ -1,23 +1,15 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: (c) 2017, Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -29,35 +21,33 @@ description:
 options:
   displayname:
     description: Display name
-    required: false
   givenname:
     description: First name
-    required: false
+  krbpasswordexpiration:
+    description:
+    - Date at which the user password will expire
+    - In the format YYYYMMddHHmmss
+    - e.g. 20180121182022 will expire on 21 January 2018 at 18:20:22
+    version_added: 2.5
   loginshell:
     description: Login shell
-    required: false
   mail:
     description:
     - List of mail addresses assigned to the user.
     - If an empty list is passed all assigned email addresses will be deleted.
     - If None is passed email addresses will not be checked or changed.
-    required: false
   password:
     description:
-    - Password
-    required: false
+    - Password for new user
   sn:
     description: Surname
-    required: false
   sshpubkey:
     description:
     - List of public SSH key.
     - If an empty list is passed all assigned public keys will be deleted.
     - If None is passed SSH public keys will not be checked or changed.
-    required: false
   state:
     description: State to ensure
-    required: false
     default: "present"
     choices: ["present", "absent", "enabled", "disabled"]
   telephonenumber:
@@ -65,41 +55,21 @@ options:
     - List of telephone numbers assigned to the user.
     - If an empty list is passed all assigned telephone numbers will be deleted.
     - If None is passed telephone numbers will not be checked or changed.
-    required: false
   title:
     description: Title
-    required: false
   uid:
     description: uid of the user
     required: true
     aliases: ["name"]
-  ipa_port:
-    description: Port of IPA server
-    required: false
-    default: 443
-  ipa_host:
-    description: IP or hostname of IPA server
-    required: false
-    default: "ipa.example.com"
-  ipa_user:
-    description: Administrative account used on IPA server
-    required: false
-    default: "admin"
-  ipa_pass:
-    description: Password of administrative user
-    required: true
-  ipa_prot:
-    description: Protocol used by IPA server
-    required: false
-    default: "https"
-    choices: ["http", "https"]
-  validate_certs:
+  uidnumber:
     description:
-    - This only applies if C(ipa_prot) is I(https).
-    - If set to C(no), the SSL certificates will not be validated.
-    - This should only set to C(no) used on personally controlled sites using self-signed certificates.
-    required: false
-    default: true
+    - Account Settings UID/Posix User ID number
+    version_added: 2.5
+  gidnumber:
+    description:
+    - Posix Group ID
+    version_added: 2.5
+extends_documentation_fragment: ipa.documentation
 version_added: "2.3"
 requirements:
 - base64
@@ -111,15 +81,18 @@ EXAMPLES = '''
 - ipa_user:
     name: pinky
     state: present
+    krbpasswordexpiration: 20200119235959
     givenname: Pinky
     sn: Acme
     mail:
     - pinky@acme.com
     telephonenumber:
     - '+555123456'
-    sshpubkeyfp:
+    sshpubkey:
     - ssh-rsa ....
     - ssh-dsa ....
+    uidnumber: 1001
+    gidnumber: 100
     ipa_host: ipa.example.com
     ipa_user: admin
     ipa_pass: topsecret
@@ -142,10 +115,11 @@ user:
 
 import base64
 import hashlib
+import traceback
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.pycompat24 import get_exception
-from ansible.module_utils.ipa import IPAClient
+from ansible.module_utils.ipa import IPAClient, ipa_argument_spec
+from ansible.module_utils._text import to_native
 
 
 class UserIPAClient(IPAClient):
@@ -171,11 +145,14 @@ class UserIPAClient(IPAClient):
         return self._post_json(method='user_enable', name=name)
 
 
-def get_user_dict(displayname=None, givenname=None, loginshell=None, mail=None, nsaccountlock=False, sn=None,
-                  sshpubkey=None, telephonenumber=None, title=None, userpassword=None):
+def get_user_dict(displayname=None, givenname=None, krbpasswordexpiration=None, loginshell=None,
+                  mail=None, nsaccountlock=False, sn=None, sshpubkey=None, telephonenumber=None,
+                  title=None, userpassword=None, gidnumber=None, uidnumber=None):
     user = {}
     if displayname is not None:
         user['displayname'] = displayname
+    if krbpasswordexpiration is not None:
+        user['krbpasswordexpiration'] = krbpasswordexpiration + "Z"
     if givenname is not None:
         user['givenname'] = givenname
     if loginshell is not None:
@@ -193,6 +170,10 @@ def get_user_dict(displayname=None, givenname=None, loginshell=None, mail=None, 
         user['title'] = title
     if userpassword is not None:
         user['userpassword'] = userpassword
+    if gidnumber is not None:
+        user['gidnumber'] = gidnumber
+    if uidnumber is not None:
+        user['uidnumber'] = uidnumber
 
     return user
 
@@ -213,7 +194,10 @@ def get_user_diff(client, ipa_user, module_user):
     # These are used for comparison.
     sshpubkey = None
     if 'ipasshpubkey' in module_user:
-        module_user['sshpubkeyfp'] = [get_ssh_key_fingerprint(pubkey) for pubkey in module_user['ipasshpubkey']]
+        hash_algo = 'md5'
+        if 'sshpubkeyfp' in ipa_user and ipa_user['sshpubkeyfp'][0][:7].upper() == 'SHA256:':
+            hash_algo = 'sha256'
+        module_user['sshpubkeyfp'] = [get_ssh_key_fingerprint(pubkey, hash_algo) for pubkey in module_user['ipasshpubkey']]
         # Remove the ipasshpubkey element as it is not returned from IPA but save it's value to be used later on
         sshpubkey = module_user['ipasshpubkey']
         del module_user['ipasshpubkey']
@@ -227,11 +211,16 @@ def get_user_diff(client, ipa_user, module_user):
     return result
 
 
-def get_ssh_key_fingerprint(ssh_key):
+def get_ssh_key_fingerprint(ssh_key, hash_algo='sha256'):
     """
     Return the public key fingerprint of a given public SSH key
-    in format "FB:0C:AC:0A:07:94:5B:CE:75:6E:63:32:13:AD:AD:D7 [user@host] (ssh-rsa)"
+    in format "[fp] [user@host] (ssh-rsa)" where fp is of the format:
+    FB:0C:AC:0A:07:94:5B:CE:75:6E:63:32:13:AD:AD:D7
+    for md5 or
+    SHA256:[base64]
+    for sha256
     :param ssh_key:
+    :param hash_algo:
     :return:
     """
     parts = ssh_key.strip().split()
@@ -240,8 +229,12 @@ def get_ssh_key_fingerprint(ssh_key):
     key_type = parts[0]
     key = base64.b64decode(parts[1].encode('ascii'))
 
-    fp_plain = hashlib.md5(key).hexdigest()
-    key_fp = ':'.join(a + b for a, b in zip(fp_plain[::2], fp_plain[1::2])).upper()
+    if hash_algo == 'md5':
+        fp_plain = hashlib.md5(key).hexdigest()
+        key_fp = ':'.join(a + b for a, b in zip(fp_plain[::2], fp_plain[1::2])).upper()
+    elif hash_algo == 'sha256':
+        fp_plain = base64.b64encode(hashlib.sha256(key).digest()).decode('ascii').rstrip('=')
+        key_fp = 'SHA256:{fp}'.format(fp=fp_plain)
     if len(parts) < 3:
         return "%s (%s)" % (key_fp, key_type)
     else:
@@ -251,16 +244,18 @@ def get_ssh_key_fingerprint(ssh_key):
 
 def ensure(module, client):
     state = module.params['state']
-    name = module.params['name']
+    name = module.params['uid']
     nsaccountlock = state == 'disabled'
 
     module_user = get_user_dict(displayname=module.params.get('displayname'),
+                                krbpasswordexpiration=module.params.get('krbpasswordexpiration'),
                                 givenname=module.params.get('givenname'),
                                 loginshell=module.params['loginshell'],
                                 mail=module.params['mail'], sn=module.params['sn'],
                                 sshpubkey=module.params['sshpubkey'], nsaccountlock=nsaccountlock,
                                 telephonenumber=module.params['telephonenumber'], title=module.params['title'],
-                                userpassword=module.params['password'])
+                                userpassword=module.params['password'],
+                                gidnumber=module.params.get('gidnumber'), uidnumber=module.params.get('uidnumber'))
 
     ipa_user = client.user_find(name=name)
 
@@ -286,29 +281,25 @@ def ensure(module, client):
 
 
 def main():
-    module = AnsibleModule(
-        argument_spec=dict(
-            displayname=dict(type='str', required=False),
-            givenname=dict(type='str', required=False),
-            loginshell=dict(type='str', required=False),
-            mail=dict(type='list', required=False),
-            sn=dict(type='str', required=False),
-            uid=dict(type='str', required=True, aliases=['name']),
-            password=dict(type='str', required=False, no_log=True),
-            sshpubkey=dict(type='list', required=False),
-            state=dict(type='str', required=False, default='present',
-                       choices=['present', 'absent', 'enabled', 'disabled']),
-            telephonenumber=dict(type='list', required=False),
-            title=dict(type='str', required=False),
-            ipa_prot=dict(type='str', required=False, default='https', choices=['http', 'https']),
-            ipa_host=dict(type='str', required=False, default='ipa.example.com'),
-            ipa_port=dict(type='int', required=False, default=443),
-            ipa_user=dict(type='str', required=False, default='admin'),
-            ipa_pass=dict(type='str', required=True, no_log=True),
-            validate_certs=dict(type='bool', required=False, default=True),
-        ),
-        supports_check_mode=True,
-    )
+    argument_spec = ipa_argument_spec()
+    argument_spec.update(displayname=dict(type='str'),
+                         givenname=dict(type='str'),
+                         krbpasswordexpiration=dict(type='str'),
+                         loginshell=dict(type='str'),
+                         mail=dict(type='list'),
+                         sn=dict(type='str'),
+                         uid=dict(type='str', required=True, aliases=['name']),
+                         gidnumber=dict(type='str'),
+                         uidnumber=dict(type='str'),
+                         password=dict(type='str', no_log=True),
+                         sshpubkey=dict(type='list'),
+                         state=dict(type='str', default='present',
+                                    choices=['present', 'absent', 'enabled', 'disabled']),
+                         telephonenumber=dict(type='list'),
+                         title=dict(type='str'))
+
+    module = AnsibleModule(argument_spec=argument_spec,
+                           supports_check_mode=True)
 
     client = UserIPAClient(module=module,
                            host=module.params['ipa_host'],
@@ -319,7 +310,7 @@ def main():
     # Therefore a small check here to replace list(None) by None. Otherwise get_user_diff() would return sshpubkey
     # as different which should be avoided.
     if module.params['sshpubkey'] is not None:
-        if len(module.params['sshpubkey']) == 1 and module.params['sshpubkey'][0] is "":
+        if len(module.params['sshpubkey']) == 1 and module.params['sshpubkey'][0] == "":
             module.params['sshpubkey'] = None
 
     try:
@@ -327,9 +318,8 @@ def main():
                      password=module.params['ipa_pass'])
         changed, user = ensure(module, client)
         module.exit_json(changed=changed, user=user)
-    except Exception:
-        e = get_exception()
-        module.fail_json(msg=str(e))
+    except Exception as e:
+        module.fail_json(msg=to_native(e), exception=traceback.format_exc())
 
 
 if __name__ == '__main__':

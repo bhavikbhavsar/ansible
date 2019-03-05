@@ -1,24 +1,17 @@
 #!/usr/bin/python
-#coding: utf-8 -*-
+# coding: utf-8 -*-
 
 # (c) 2017, Wayne Witzel III <wayne@riotousliving.com>
-#
-# This module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this software.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -36,8 +29,9 @@ options:
       required: True
     fail_if_not_running:
       description:
-        - Fail loudly if the job_id does not reference a running job.
+        - Fail loudly if the I(job_id) does not reference a running job.
       default: False
+      type: bool
 extends_documentation_fragment: tower
 '''
 
@@ -56,43 +50,32 @@ id:
 status:
     description: status of the cancel request
     returned: success
-    type: string
+    type: str
     sample: canceled
 '''
 
 
-from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ansible_tower import TowerModule, tower_auth_config, tower_check_mode
 
 try:
     import tower_cli
-    import tower_cli.utils.exceptions as exc
+    import tower_cli.exceptions as exc
 
     from tower_cli.conf import settings
-    from ansible.module_utils.ansible_tower import (
-        tower_auth_config,
-        tower_check_mode,
-        tower_argument_spec,
-    )
-
-    HAS_TOWER_CLI = True
 except ImportError:
-    HAS_TOWER_CLI = False
+    pass
 
 
 def main():
-    argument_spec = tower_argument_spec()
-    argument_spec.update(dict(
-        job_id = dict(type='int', required=True),
-        fail_if_not_running = dict(type='bool', default=False),
-    ))
-
-    module = AnsibleModule(
-        argument_spec = argument_spec,
-        supports_check_mode=True,
+    argument_spec = dict(
+        job_id=dict(type='int', required=True),
+        fail_if_not_running=dict(type='bool', default=False),
     )
 
-    if not HAS_TOWER_CLI:
-        module.fail_json(msg='ansible-tower-cli required for this module')
+    module = TowerModule(
+        argument_spec=argument_spec,
+        supports_check_mode=True,
+    )
 
     job_id = module.params.get('job_id')
     json_output = {}

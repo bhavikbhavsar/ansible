@@ -19,7 +19,7 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-from ansible.compat.tests import unittest, mock
+from units.compat import unittest, mock
 from ansible.errors import AnsibleError
 from ansible.plugins.cache import FactCache
 from ansible.plugins.cache.base import BaseCacheModule
@@ -78,14 +78,14 @@ class TestAbstractClass(unittest.TestCase):
         class CacheModule1(BaseCacheModule):
             pass
         with self.assertRaises(TypeError):
-            CacheModule1()
+            CacheModule1()  # pylint: disable=abstract-class-instantiated
 
         class CacheModule2(BaseCacheModule):
             def get(self, key):
                 super(CacheModule2, self).get(key)
 
         with self.assertRaises(TypeError):
-            CacheModule2()
+            CacheModule2()  # pylint: disable=abstract-class-instantiated
 
     def test_subclass_success(self):
         class CacheModule3(BaseCacheModule):

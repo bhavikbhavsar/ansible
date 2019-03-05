@@ -1,30 +1,19 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-"""
-Ansible module to manage A10 Networks slb server objects
-(c) 2014, Mischa Peters <mpeters@a10networks.com>,
-2016, Eric Chou <ericc@a10networks.com>
+# (c) 2014, Mischa Peters <mpeters@a10networks.com>,
+# (c) 2016, Eric Chou <ericc@a10networks.com>
+#
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-This file is part of Ansible
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
-Ansible is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
 
-Ansible is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
 
-You should have received a copy of the GNU General Public License
-along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-"""
-
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
 
 DOCUMENTATION = '''
 ---
@@ -33,17 +22,19 @@ version_added: 1.8
 short_description: Manage A10 Networks AX/SoftAX/Thunder/vThunder devices' server object.
 description:
     - Manage SLB (Server Load Balancer) server objects on A10 Networks devices via aXAPIv2.
-author: "Eric Chou (@ericchou) 2016, Mischa Peters (@mischapeters) 2014"
+author:
+  - Eric Chou (@ericchou)
+  - Mischa Peters (@mischapeters)
 notes:
     - Requires A10 Networks aXAPI 2.1.
-extends_documentation_fragment: a10
+extends_documentation_fragment:
+  - a10
+  - url
 options:
   partition:
     version_added: "2.3"
     description:
       - set active-partition
-    required: false
-    default: null
   server_name:
     description:
       - The SLB (Server Load Balancer) server name.
@@ -52,13 +43,10 @@ options:
   server_ip:
     description:
       - The SLB server IPv4 address.
-    required: false
-    default: null
     aliases: ['ip', 'address']
   server_status:
     description:
       - The SLB virtual server status.
-    required: false
     default: enabled
     aliases: ['status']
     choices: ['enabled', 'disabled']
@@ -68,27 +56,20 @@ options:
         dictionary which specifies the C(port:) and C(protocol:), but can also optionally
         specify the C(status:). See the examples below for details. This parameter is
         required when C(state) is C(present).
-    required: false
-    default: null
+    aliases: ['port']
   state:
     description:
       - This is to specify the operation to create, update or remove SLB server.
-    required: false
     default: present
     choices: ['present', 'absent']
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated. This should only be used
         on personally controlled devices using self-signed certificates.
-    required: false
     version_added: 2.3
+    type: bool
     default: 'yes'
-    choices: ['yes', 'no']
 
-'''
-
-RETURN = '''
-#
 '''
 
 EXAMPLES = '''
@@ -112,12 +93,19 @@ RETURN = '''
 content:
   description: the full info regarding the slb_server
   returned: success
-  type: string
+  type: str
   sample: "mynewserver"
 '''
+import json
+
+from ansible.module_utils.network.a10.a10 import (axapi_call, a10_argument_spec, axapi_authenticate, axapi_failure, axapi_get_port_protocol,
+                                                  axapi_enabled_disabled, AXAPI_PORT_PROTOCOLS)
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.urls import url_argument_spec
 
 
 VALID_PORT_FIELDS = ['port_num', 'protocol', 'status']
+
 
 def validate_ports(module, ports):
     for item in ports:
@@ -129,7 +117,7 @@ def validate_ports(module, ports):
         if 'port_num' in item:
             try:
                 item['port_num'] = int(item['port_num'])
-            except:
+            except Exception:
                 module.fail_json(msg="port_num entries in the port definitions must be integers")
         else:
             module.fail_json(msg="port definitions must define the port_num field")
@@ -207,7 +195,7 @@ def main():
     if slb_server_status:
         json_post['server']['status'] = axapi_enabled_disabled(slb_server_status)
 
-    slb_server_partition = axapi_call(module, session_url + '&method=system.partition.active', json.dumps({'name': partition}))
+    axapi_call(module, session_url + '&method=system.partition.active', json.dumps({'name': partition}))
 
     slb_server_data = axapi_call(module, session_url + '&method=slb.server.search', json.dumps({'name': slb_server}))
     slb_server_exists = not axapi_failure(slb_server_data)
@@ -263,7 +251,9 @@ def main():
             # - in case ports are missing from the ones specified by the user
             # - in case ports are missing from those on the device
             # - in case we are change the status of a server
-            if port_needs_update(defined_ports, slb_server_ports) or port_needs_update(slb_server_ports, defined_ports) or status_needs_update(current_status, axapi_enabled_disabled(slb_server_status)):
+            if (port_needs_update(defined_ports, slb_server_ports) or
+                    port_needs_update(slb_server_ports, defined_ports) or
+                    status_needs_update(current_status, axapi_enabled_disabled(slb_server_status))):
                 result = axapi_call(module, session_url + '&method=slb.server.update', json.dumps(json_post))
                 if axapi_failure(result):
                     module.fail_json(msg="failed to update the server: %s" % result['response']['err']['msg'])
@@ -291,12 +281,6 @@ def main():
     # log out of the session nicely and exit
     axapi_call(module, session_url + '&method=session.close')
     module.exit_json(changed=changed, content=result)
-
-# ansible module imports
-import json
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.urls import url_argument_spec
-from ansible.module_utils.a10 import axapi_call, a10_argument_spec, axapi_authenticate, axapi_failure, axapi_get_port_protocol, axapi_enabled_disabled
 
 
 if __name__ == '__main__':

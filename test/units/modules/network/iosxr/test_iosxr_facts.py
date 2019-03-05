@@ -21,8 +21,9 @@ __metaclass__ = type
 
 import json
 
-from ansible.compat.tests.mock import patch
-from .iosxr_module import TestIosxrModule, load_fixture, set_module_args
+from units.compat.mock import patch
+from units.modules.utils import set_module_args
+from .iosxr_module import TestIosxrModule, load_fixture
 from ansible.modules.network.iosxr import iosxr_facts
 
 
@@ -31,11 +32,15 @@ class TestIosxrFacts(TestIosxrModule):
     module = iosxr_facts
 
     def setUp(self):
+        super(TestIosxrFacts, self).setUp()
+
         self.mock_run_commands = patch(
             'ansible.modules.network.iosxr.iosxr_facts.run_commands')
         self.run_commands = self.mock_run_commands.start()
 
     def tearDown(self):
+        super(TestIosxrFacts, self).tearDown()
+
         self.mock_run_commands.stop()
 
     def load_fixtures(self, commands=None):
@@ -52,6 +57,7 @@ class TestIosxrFacts(TestIosxrModule):
                     command = item
                 filename = str(command).replace(' ', '_')
                 filename = filename.replace('/', '7')
+                filename = filename.replace('|', '_')
                 output.append(load_fixture(filename))
             return output
 
@@ -66,8 +72,9 @@ class TestIosxrFacts(TestIosxrModule):
         self.assertIn('interfaces', ansible_facts['ansible_net_gather_subset'])
         self.assertEquals('iosxr01', ansible_facts['ansible_net_hostname'])
         self.assertEquals(['disk0:', 'flash0:'], ansible_facts['ansible_net_filesystems'])
-        self.assertIn('GigabitEthernet0/0/0/0',
-            ansible_facts['ansible_net_interfaces'].keys())
+        self.assertIn('GigabitEthernet0/0/0/0', ansible_facts['ansible_net_interfaces'].keys())
+        self.assertEquals('3095', ansible_facts['ansible_net_memtotal_mb'])
+        self.assertEquals('1499', ansible_facts['ansible_net_memfree_mb'])
 
     def test_iosxr_facts_gather_subset_config(self):
         set_module_args({'gather_subset': 'config'})

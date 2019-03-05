@@ -2,31 +2,21 @@
 # -*- coding: utf-8 -*-
 
 # (c) 2016, Adam Števko <adam.stevko@gmail.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible. If not, see <http://www.gnu.org/licenses/>.
-#
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
 module: flowadm
-short_description: Manage bandwidth resource control and priority for protocols, services and zones.
+short_description: Manage bandwidth resource control and priority for protocols, services and zones on Solaris/illumos systems
 description:
     - Create/modify/remove networking bandwidth and associated resources for a type of traffic on a particular link.
 version_added: "2.2"
@@ -46,7 +36,7 @@ options:
         description:
             - Identifies a network flow by the local IP address.
         required: false
-    remove_ip:
+    remote_ip:
         description:
             - Identifies a network flow by the remote IP address.
         required: false
@@ -85,7 +75,7 @@ options:
               flows do not persist across reboots.
         required: false
         default: false
-        choices: [ "true", "false" ]
+        type: bool
     state:
         description:
             - Create/delete/enable/disable an IP address on the network interface.
@@ -123,42 +113,42 @@ RETURN = '''
 name:
     description: flow name
     returned: always
-    type: string
+    type: str
     sample: "http_drop"
 link:
     description: flow's link
     returned: if link is defined
-    type: string
+    type: str
     sample: "vnic0"
 state:
     description: state of the target
     returned: always
-    type: string
+    type: str
     sample: "present"
 temporary:
     description: flow's persistence
     returned: always
-    type: boolean
+    type: bool
     sample: "True"
 priority:
     description: flow's priority
     returned: if priority is defined
-    type: string
+    type: str
     sample: "low"
 transport:
     description: flow's transport
     returned: if transport is defined
-    type: string
+    type: str
     sample: "tcp"
 maxbw:
     description: flow's maximum bandwidth
     returned: if maxbw is defined
-    type: string
+    type: str
     sample: "100M"
 local_Ip:
     description: flow's local IP address
     returned: if local_ip is defined
-    type: string
+    type: str
     sample: "10.0.0.42"
 local_port:
     description: flow's local port
@@ -168,17 +158,20 @@ local_port:
 remote_Ip:
     description: flow's remote IP address
     returned: if remote_ip is defined
-    type: string
+    type: str
     sample: "10.0.0.42"
 dsfield:
     description: flow's differentiated services value
     returned: if dsfield is defined
-    type: string
+    type: str
     sample: "0x2e:0xfc"
 '''
 
 
 import socket
+
+from ansible.module_utils.basic import AnsibleModule
+
 
 SUPPORTED_TRANSPORTS = ['tcp', 'udp', 'sctp', 'icmp', 'icmpv6']
 SUPPORTED_PRIORITIES = ['low', 'medium', 'high']
@@ -516,8 +509,6 @@ def main():
 
     module.exit_json(**result)
 
-
-from ansible.module_utils.basic import *
 
 if __name__ == '__main__':
     main()

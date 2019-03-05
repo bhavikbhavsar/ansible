@@ -20,17 +20,13 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-from ansible.compat.six import string_types
-
+from ansible.errors import AnsibleError
+from ansible.module_utils.six import string_types
 from ansible.plugins.action import ActionBase
 from ansible.parsing.utils.addresses import parse_address
-from ansible.errors import AnsibleError
+from ansible.utils.display import Display
 
-try:
-    from __main__ import display
-except ImportError:
-    from ansible.utils.display import Display
-    display = Display()
+display = Display()
 
 
 class ActionModule(ActionBase):
@@ -42,20 +38,24 @@ class ActionModule(ActionBase):
 
     def run(self, tmp=None, task_vars=None):
 
-        self._supports_check_mode = False
+        self._supports_check_mode = True
 
         result = super(ActionModule, self).run(tmp, task_vars)
-
-        if result.get('skipped', False):
-            return result
+        del tmp  # tmp no longer has any effect
 
         # Parse out any hostname:port patterns
-        new_name = self._task.args.get('name', self._task.args.get('hostname', None))
+        new_name = self._task.args.get('name', self._task.args.get('hostname', self._task.args.get('host', None)))
+
+        if new_name is None:
+            result['failed'] = True
+            result['msg'] = 'name or hostname arg needs to be provided'
+            return result
+
         display.vv("creating host via 'add_host': hostname=%s" % new_name)
 
         try:
             name, port = parse_address(new_name, allow_ranges=False)
-        except:
+        except Exception:
             # not a parsable hostname, but might still be usable
             name = new_name
             port = None
@@ -72,7 +72,7 @@ class ActionModule(ActionBase):
             elif isinstance(groups, string_types):
                 group_list = groups.split(",")
             else:
-                raise AnsibleError("Groups must be specfied as a list.", obj=self._task)
+                raise AnsibleError("Groups must be specified as a list.", obj=self._task)
 
             for group_name in group_list:
                 if group_name not in new_groups:

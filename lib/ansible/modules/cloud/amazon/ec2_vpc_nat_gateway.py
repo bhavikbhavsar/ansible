@@ -1,22 +1,15 @@
 #!/usr/bin/python
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -30,66 +23,56 @@ options:
   state:
     description:
       - Ensure NAT Gateway is present or absent.
-    required: false
     default: "present"
     choices: ["present", "absent"]
   nat_gateway_id:
     description:
       - The id AWS dynamically allocates to the NAT Gateway on creation.
         This is required when the absent option is present.
-    required: false
-    default: None
   subnet_id:
     description:
       - The id of the subnet to create the NAT Gateway in. This is required
         with the present option.
-    required: false
-    default: None
   allocation_id:
     description:
       - The id of the elastic IP allocation. If this is not passed and the
         eip_address is not passed. An EIP is generated for this NAT Gateway.
-    required: false
-    default: None
   eip_address:
     description:
       - The elastic IP address of the EIP you want attached to this NAT Gateway.
         If this is not passed and the allocation_id is not passed,
         an EIP is generated for this NAT Gateway.
-    required: false
   if_exist_do_not_create:
     description:
       - if a NAT Gateway exists already in the subnet_id, then do not create a new one.
     required: false
     default: false
+    type: bool
   release_eip:
     description:
       - Deallocate the EIP from the VPC.
       - Option is only valid with the absent state.
       - You should use this with the wait option. Since you can not release an address while a delete operation is happening.
-    required: false
-    default: true
+    default: 'yes'
+    type: bool
   wait:
     description:
       - Wait for operation to complete before returning.
-    required: false
-    default: false
+    default: 'no'
+    type: bool
   wait_timeout:
     description:
       - How many seconds to wait for an operation to complete before timing out.
-    required: false
     default: 300
   client_token:
     description:
       - Optional unique token to be used during create to ensure idempotency.
         When specifying this option, ensure you specify the eip_address parameter
         as well otherwise any subsequent runs will fail.
-    required: false
-
 author:
-  - "Allen Sanabria (@linuxdynasty)"
-  - "Jon Hadfield (@jonhadfield)"
-  - "Karen Cheng(@Etherdaemon)"
+  - Allen Sanabria (@linuxdynasty)
+  - Jon Hadfield (@jonhadfield)
+  - Karen Cheng (@Etherdaemon)
 extends_documentation_fragment:
   - aws
   - ec2
@@ -149,7 +132,7 @@ EXAMPLES = '''
     nat_gateway_id: "{{ item.NatGatewayId }}"
     release_eip: yes
   register: delete_nat_gateway_result
-  with_items: "{{ gateways_to_remove.result }}"
+  loop: "{{ gateways_to_remove.result }}"
 
 - name: Delete nat gateway and wait for deleted status.
   ec2_vpc_nat_gateway:
@@ -171,34 +154,34 @@ EXAMPLES = '''
 
 RETURN = '''
 create_time:
-  description: The ISO 8601 date time formatin UTC.
+  description: The ISO 8601 date time format in UTC.
   returned: In all cases.
-  type: string
+  type: str
   sample: "2016-03-05T05:19:20.282000+00:00'"
 nat_gateway_id:
   description: id of the VPC NAT Gateway
   returned: In all cases.
-  type: string
+  type: str
   sample: "nat-0d1e3a878585988f8"
 subnet_id:
   description: id of the Subnet
   returned: In all cases.
-  type: string
+  type: str
   sample: "subnet-12345"
 state:
   description: The current state of the NAT Gateway.
   returned: In all cases.
-  type: string
+  type: str
   sample: "available"
 vpc_id:
   description: id of the VPC.
   returned: In all cases.
-  type: string
+  type: str
   sample: "vpc-12345"
 nat_gateway_addresses:
   description: List of dictionairies containing the public_ip, network_interface_id, private_ip, and allocation_id.
   returned: In all cases.
-  type: string
+  type: str
   sample: [
       {
           'public_ip': '52.52.52.52',
@@ -209,22 +192,19 @@ nat_gateway_addresses:
   ]
 '''
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.ec2 import ec2_argument_spec, get_aws_connection_info, boto3_conn
-
 import datetime
 import random
-import re
 import time
-
-from dateutil.tz import tzutc
 
 try:
     import botocore
-    import boto3
-    HAS_BOTO3 = True
 except ImportError:
-    HAS_BOTO3 = False
+    pass  # caught by imported HAS_BOTO3
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import (ec2_argument_spec, get_aws_connection_info, boto3_conn,
+                                      camel_dict_to_snake_dict, HAS_BOTO3)
+
 
 DRY_RUN_GATEWAYS = [
     {
@@ -243,23 +223,6 @@ DRY_RUN_GATEWAYS = [
         "vpc_id": "vpc-12345678"
     }
 ]
-DRY_RUN_GATEWAY_UNCONVERTED = [
-    {
-        'VpcId': 'vpc-12345678',
-        'State': 'available',
-        'NatGatewayId': 'nat-123456789',
-        'SubnetId': 'subnet-123456789',
-        'NatGatewayAddresses': [
-            {
-                'PublicIp': '55.55.55.55',
-                'NetworkInterfaceId': 'eni-1234567',
-                'AllocationId': 'eipalloc-1234567',
-                'PrivateIp': '10.0.0.102'
-            }
-        ],
-        'CreateTime': datetime.datetime(2016, 3, 5, 5, 19, 20, 282000, tzinfo=tzutc())
-    }
-]
 
 DRY_RUN_ALLOCATION_UNCONVERTED = {
     'Addresses': [
@@ -272,45 +235,6 @@ DRY_RUN_ALLOCATION_UNCONVERTED = {
 }
 
 DRY_RUN_MSGS = 'DryRun Mode:'
-
-
-def convert_to_lower(data):
-    """Convert all uppercase keys in dict with lowercase_
-
-    Args:
-        data (dict): Dictionary with keys that have upper cases in them
-            Example.. FooBar == foo_bar
-            if a val is of type datetime.datetime, it will be converted to
-            the ISO 8601
-
-    Basic Usage:
-        >>> test = {'FooBar': []}
-        >>> test = convert_to_lower(test)
-        {
-            'foo_bar': []
-        }
-
-    Returns:
-        Dictionary
-    """
-    results = dict()
-    if isinstance(data, dict):
-        for key, val in data.items():
-            key = re.sub(r'(([A-Z]{1,3}){1})', r'_\1', key).lower()
-            if key[0] == '_':
-                key = key[1:]
-            if isinstance(val, datetime.datetime):
-                results[key] = val.isoformat()
-            elif isinstance(val, dict):
-                results[key] = convert_to_lower(val)
-            elif isinstance(val, list):
-                converted = list()
-                for item in val:
-                    converted.append(convert_to_lower(item))
-                results[key] = converted
-            else:
-                results[key] = val
-    return results
 
 
 def get_nat_gateways(client, subnet_id=None, nat_gateway_id=None,
@@ -377,7 +301,7 @@ def get_nat_gateways(client, subnet_id=None, nat_gateway_id=None,
             gateways = client.describe_nat_gateways(**params)['NatGateways']
             if gateways:
                 for gw in gateways:
-                    existing_gateways.append(convert_to_lower(gw))
+                    existing_gateways.append(camel_dict_to_snake_dict(gw))
             gateways_retrieved = True
         else:
             gateways_retrieved = True
@@ -746,22 +670,22 @@ def create(client, subnet_id, allocation_id, client_token=None,
 
     try:
         if not check_mode:
-            result = client.create_nat_gateway(**params)["NatGateway"]
+            result = camel_dict_to_snake_dict(client.create_nat_gateway(**params)["NatGateway"])
         else:
-            result = DRY_RUN_GATEWAY_UNCONVERTED[0]
-            result['CreateTime'] = datetime.datetime.utcnow()
-            result['NatGatewayAddresses'][0]['AllocationId'] = allocation_id
-            result['SubnetId'] = subnet_id
+            result = DRY_RUN_GATEWAYS[0]
+            result['create_time'] = datetime.datetime.utcnow()
+            result['nat_gateway_addresses'][0]['allocation_id'] = allocation_id
+            result['subnet_id'] = subnet_id
 
         success = True
         changed = True
-        create_time = result['CreateTime'].replace(tzinfo=None)
+        create_time = result['create_time'].replace(tzinfo=None)
         if token_provided and (request_time > create_time):
             changed = False
         elif wait:
             success, err_msg, result = (
                 wait_for_status(
-                    client, wait_timeout, result['NatGatewayId'], 'available',
+                    client, wait_timeout, result['nat_gateway_id'], 'available',
                     check_mode=check_mode
                 )
             )
@@ -773,13 +697,13 @@ def create(client, subnet_id, allocation_id, client_token=None,
     except botocore.exceptions.ClientError as e:
         if "IdempotentParameterMismatch" in e.message:
             err_msg = (
-                'NAT Gateway does not support update and token has already been provided'
+                'NAT Gateway does not support update and token has already been provided: ' + str(e)
             )
         else:
             err_msg = str(e)
-            success = False
-            changed = False
-            result = None
+        success = False
+        changed = False
+        result = None
 
     return success, changed, err_msg, result
 
@@ -948,7 +872,7 @@ def remove(client, nat_gateway_id, wait=False, wait_timeout=0,
     changed = False
     err_msg = ""
     results = list()
-    states = ['pending', 'available' ]
+    states = ['pending', 'available']
     try:
         exist, _, gw = (
             get_nat_gateways(
@@ -1022,7 +946,9 @@ def main():
         supports_check_mode=True,
         mutually_exclusive=[
             ['allocation_id', 'eip_address']
-        ]
+        ],
+        required_if=[['state', 'absent', ['nat_gateway_id']],
+                     ['state', 'present', ['subnet_id']]]
     )
 
     # Validate Requirements
@@ -1058,9 +984,6 @@ def main():
     err_msg = ''
 
     if state == 'present':
-        if not subnet_id:
-            module.fail_json(msg='subnet_id is required for creation')
-
         success, changed, err_msg, results = (
             pre_create(
                 client, subnet_id, allocation_id, eip_address,
@@ -1069,16 +992,12 @@ def main():
             )
         )
     else:
-        if not nat_gateway_id:
-            module.fail_json(msg='nat_gateway_id is required for removal')
-
-        else:
-            success, changed, err_msg, results = (
-                remove(
-                    client, nat_gateway_id, wait, wait_timeout, release_eip,
-                    check_mode=check_mode
-                )
+        success, changed, err_msg, results = (
+            remove(
+                client, nat_gateway_id, wait, wait_timeout, release_eip,
+                check_mode=check_mode
             )
+        )
 
     if not success:
         module.fail_json(

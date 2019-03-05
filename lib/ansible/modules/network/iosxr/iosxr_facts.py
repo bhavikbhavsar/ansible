@@ -1,37 +1,33 @@
 #!/usr/bin/python
 #
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
 module: iosxr_facts
 version_added: "2.2"
 author: "Ricardo Carrillo Cruz (@rcarrillocruz)"
-short_description: Collect facts from remote devices running IOS-XR
+short_description: Collect facts from remote devices running IOS XR
 description:
   - Collects a base set of device facts from a remote device that
-    is running iosxr.  This module prepends all of the
+    is running IOS XR.  This module prepends all of the
     base network fact keys with C(ansible_net_<fact>).  The facts
     module will always collect a base set of facts from the device
     and can enable or disable collection of additional facts.
 extends_documentation_fragment: iosxr
+notes:
+  - Tested against IOS XRv 6.1.2
+  - This module does not support netconf connection
 options:
   gather_subset:
     description:
@@ -75,11 +71,11 @@ ansible_net_version:
 ansible_net_hostname:
   description: The configured hostname of the device
   returned: always
-  type: string
+  type: str
 ansible_net_image:
   description: The image file the device is running
   returned: always
-  type: string
+  type: str
 
 # hardware
 ansible_net_filesystems:
@@ -121,11 +117,10 @@ ansible_net_neighbors:
 """
 import re
 
-from ansible.module_utils.iosxr import run_commands
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.network.iosxr.iosxr import iosxr_argument_spec, run_commands
 from ansible.module_utils.six import iteritems
 from ansible.module_utils.six.moves import zip
-from ansible.module_utils.iosxr import iosxr_argument_spec, check_args
 
 
 class FactsBase(object):
@@ -141,12 +136,12 @@ class FactsBase(object):
 class Default(FactsBase):
 
     def commands(self):
-        return(['show version brief'])
+        return(['show version | utility head -n 20'])
 
     def populate(self, results):
-        self.facts['version'] = self.parse_version(results['show version brief'])
-        self.facts['image'] = self.parse_image(results['show version brief'])
-        self.facts['hostname'] = self.parse_hostname(results['show version brief'])
+        self.facts['version'] = self.parse_version(results['show version | utility head -n 20'])
+        self.facts['image'] = self.parse_image(results['show version | utility head -n 20'])
+        self.facts['hostname'] = self.parse_hostname(results['show version | utility head -n 20'])
 
     def parse_version(self, data):
         match = re.search(r'Version (\S+)$', data, re.M)
@@ -173,11 +168,11 @@ class Hardware(FactsBase):
         self.facts['filesystems'] = self.parse_filesystems(
             results['dir /all'])
 
-        match = re.search(r'Physical Memory (\d+)M total \((\d+)',
-            results['show memory summary'])
+        match = re.search(r'Physical Memory: (\d+)M total \((\d+)',
+                          results['show memory summary'])
         if match:
-            self.facts['memtotal_mb'] = int(match[0])
-            self.facts['memfree_mb'] = int(match[1])
+            self.facts['memtotal_mb'] = match.group(1)
+            self.facts['memfree_mb'] = match.group(2)
 
     def parse_filesystems(self, data):
         return re.findall(r'^Directory of (\S+)', data, re.M)
@@ -196,7 +191,7 @@ class Interfaces(FactsBase):
 
     def commands(self):
         return(['show interfaces', 'show ipv6 interface',
-            'show lldp', 'show lldp neighbors detail'])
+                'show lldp', 'show lldp neighbors detail'])
 
     def populate(self, results):
         self.facts['all_ipv4_addresses'] = list()
@@ -238,6 +233,8 @@ class Interfaces(FactsBase):
 
     def populate_ipv6_interfaces(self, data):
         for key, value in iteritems(data):
+            if key in ['No', 'RPF'] or key.startswith('IP'):
+                continue
             self.facts['interfaces'][key]['ipv6'] = list()
             addresses = re.findall(r'\s+(.+), subnet', value, re.M)
             subnets = re.findall(r', subnet is (.+)$', value, re.M)
@@ -310,7 +307,7 @@ class Interfaces(FactsBase):
             return int(match.group(1))
 
     def parse_duplex(self, data):
-        match = re.search(r'(\w+) Duplex', data, re.M)
+        match = re.search(r'(\w+)(?: D|-d)uplex', data, re.M)
         if match:
             return match.group(1)
 
@@ -366,7 +363,6 @@ def main():
                            supports_check_mode=True)
 
     warnings = list()
-    check_args(module, warnings)
 
     gather_subset = module.params['gather_subset']
 

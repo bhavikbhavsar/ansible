@@ -1,86 +1,64 @@
 #!powershell
-# This file is part of Ansible
-#
-# Copyright 2015, Jon Hawkesworth (@jhawkesworth) <figs@unity.demon.co.uk>
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-# WANT_JSON
-# POWERSHELL_COMMON
+# Copyright: (c) 2015, Jon Hawkesworth (@jhawkesworth) <figs@unity.demon.co.uk>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-$params = Parse-Args $args -supports_check_mode $true
-$check_mode = Get-AnsibleParam -obj $params -name "_ansible_check_mode" -type "bool" -default $false
-$diff_support = Get-AnsibleParam -obj $params -name "_ansible_diff" -type "bool" -default $false
+#AnsibleRequires -CSharpUtil Ansible.Basic
 
-$name = Get-AnsibleParam -obj $params -name "name" -type "str" -failifempty $true
-$state = Get-AnsibleParam -obj $params -name "state" -type "str" -default "present" -validateset "present","absent"
-$value = Get-AnsibleParam -obj $params -name "value" -type "str"
-$level = Get-AnsibleParam -obj $params -name "level" -type "str" -validateSet "machine","user","process" -failifempty $true
+$spec = @{
+    options = @{
+        name = @{ type = "str"; required = $true }
+        level = @{ type = "str"; choices = "machine", "process", "user"; required = $true }
+        state = @{ type = "str"; choices = "absent", "present"; default = "present" }
+        value = @{ type = "str" }
+    }
+    required_by = @{
+        present = @("value")
+    }
+    required_if = @(,@("state", "present", @("value")))
+    supports_check_mode = $true
+}
+
+$module = [Ansible.Basic.AnsibleModule]::Create($args, $spec)
+
+$name = $module.Params.name
+$level = $module.Params.level
+$state = $module.Params.state
+$value = $module.Params.value
 
 $before_value = [Environment]::GetEnvironmentVariable($name, $level)
+$module.Result.before_value = $before_value
+$module.Result.value = $value
 
 # When removing environment, set value to $null if set
 if ($state -eq "absent" -and $value) {
+    $module.Warn("When removing environment variable '$name' it should not have a value '$value' set")
     $value = $null
+} elseif ($state -eq "present" -and (-not $value)) {
+    $module.FailJson("When state=present, value must be defined and not an empty string, if you wish to remove the envvar, set state=absent")
 }
 
-$result = @{
-    before_value = $before_value
-    changed = $false
-    level = $level
-    name = $name
-    value = $value
+$module.Diff.before = @{ $level = @{} }
+if ($before_value) {
+    $module.Diff.before.$level.$name = $before_value
 }
-
-if ($diff_support) {
-    $result.diff = @{}
+$module.Diff.after = @{ $level = @{} }
+if ($value) {
+    $module.Diff.after.$level.$name = $value
 }
 
 if ($state -eq "present" -and $before_value -ne $value) {
-    if (-not $check_mode) {
+    if (-not $module.CheckMode) {
         [Environment]::SetEnvironmentVariable($name, $value, $level)
     }
-    $result.changed = $true
-
-    if ($diff_support) {
-        if ($before_value -eq $null) {
-            $result.diff.prepared = @"
-[$level]
-+$NAME = $value
-"@
-        } else {
-            $result.diff.prepared = @"
-[$level]
--$NAME = $before_value
-+$NAME = $value
-"@
-        }
-    }
+    $module.Result.changed = $true
 
 } elseif ($state -eq "absent" -and $before_value -ne $null) {
-    if (-not $check_mode) {
+    if (-not $module.CheckMode) {
         [Environment]::SetEnvironmentVariable($name, $null, $level)
     }
-    $result.changed = $true
-
-    if ($diff_support) {
-        $result.diff.prepared = @"
-[$level]
--$NAME = $before_value
-"@
-    }
-
+    $module.Result.changed = $true
 }
 
-Exit-Json $result
+$module.ExitJson()
+

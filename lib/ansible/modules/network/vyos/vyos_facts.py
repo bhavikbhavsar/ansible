@@ -15,11 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0',
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
+
 
 DOCUMENTATION = """
 ---
@@ -34,6 +33,8 @@ description:
     module will always collect a base set of facts from the device
     and can enable or disable collection of additional facts.
 extends_documentation_fragment: vyos
+notes:
+  - Tested against VYOS 1.1.7
 options:
   gather_subset:
     description:
@@ -99,8 +100,8 @@ import re
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.six import iteritems
-from ansible.module_utils.vyos import run_commands
-from ansible.module_utils.vyos import vyos_argument_spec, check_args
+from ansible.module_utils.network.vyos.vyos import run_commands
+from ansible.module_utils.network.vyos.vyos import vyos_argument_spec
 
 
 class FactsBase(object):
@@ -134,7 +135,7 @@ class Default(FactsBase):
         self.facts['hostname'] = self.responses[1]
 
     def parse_version(self, data):
-        match = re.search(r'Version:\s*(\S+)', data)
+        match = re.search(r'Version:\s*(.*)', data)
         if match:
             return match.group(1)
 
@@ -211,6 +212,8 @@ class Neighbors(FactsBase):
                 if values:
                     parsed.append(values)
                 values = line
+        if values:
+            parsed.append(values)
         return parsed
 
     def parse_neighbors(self, data):
@@ -259,7 +262,6 @@ def main():
                            supports_check_mode=True)
 
     warnings = list()
-    check_args(module, warnings)
 
     gather_subset = module.params['gather_subset']
 

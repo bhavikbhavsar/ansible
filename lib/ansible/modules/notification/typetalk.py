@@ -1,23 +1,17 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 #
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -25,7 +19,7 @@ module: typetalk
 version_added: "1.6"
 short_description: Send a message to typetalk
 description:
-  - Send a message to typetalk using typetalk API ( http://developers.typetalk.in/ )
+  - Send a message to typetalk using typetalk API
 options:
   client_id:
     description:
@@ -55,24 +49,15 @@ EXAMPLES = '''
     msg: install completed
 '''
 
-import urllib
+import json
 
-try:
-    import json
-except ImportError:
-    try:
-        import simplejson as json
-    except ImportError:
-        json = None
-
-# import module snippets
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.pycompat24 import get_exception
+from ansible.module_utils.six.moves.urllib.parse import urlencode
 from ansible.module_utils.urls import fetch_url, ConnectionError
 
 
 def do_request(module, url, params, headers=None):
-    data = urllib.urlencode(params)
+    data = urlencode(params)
     if headers is None:
         headers = dict()
     headers = dict(headers, **{
@@ -93,7 +78,7 @@ def get_access_token(module, client_id, client_secret):
         'grant_type': 'client_credentials',
         'scope': 'topic.post'
     }
-    res = do_request(module, 'https://typetalk.in/oauth2/access_token', params)
+    res = do_request(module, 'https://typetalk.com/oauth2/access_token', params)
     return json.load(res)['access_token']
 
 
@@ -103,14 +88,13 @@ def send_message(module, client_id, client_secret, topic, msg):
     """
     try:
         access_token = get_access_token(module, client_id, client_secret)
-        url = 'https://typetalk.in/api/v1/topics/%d' % topic
+        url = 'https://typetalk.com/api/v1/topics/%d' % topic
         headers = {
             'Authorization': 'Bearer %s' % access_token,
         }
         do_request(module, url, {'message': msg}, headers)
         return True, {'access_token': access_token}
-    except ConnectionError:
-        e = get_exception()
+    except ConnectionError as e:
         return False, e
 
 

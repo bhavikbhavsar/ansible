@@ -1,24 +1,17 @@
 #!/usr/bin/python
-#coding: utf-8 -*-
+# coding: utf-8 -*-
 
 # (c) 2017, Wayne Witzel III <wayne@riotousliving.com>
-#
-# This module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this software.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -45,7 +38,6 @@ options:
     timeout:
       description:
         - Maximum time in seconds to wait for a job to finish.
-      default: null
 extends_documentation_fragment: tower
 '''
 
@@ -54,6 +46,7 @@ EXAMPLES = '''
   tower_job_launch:
     job_template: "My Job Template"
     register: job
+
 - name: Wait for job max 120s
   tower_job_wait:
     job_id: job.id
@@ -74,60 +67,46 @@ elapsed:
 started:
     description: timestamp of when the job started running
     returned: success
-    type: string
-    sample: 2017-03-01T17:03:53.200234Z
+    type: str
+    sample: "2017-03-01T17:03:53.200234Z"
 finished:
     description: timestamp of when the job finished running
     returned: success
-    type: string
-    sample: 2017-03-01T17:04:04.078782Z
+    type: str
+    sample: "2017-03-01T17:04:04.078782Z"
 status:
     description: current status of job
     returned: success
-    type: string
+    type: str
     sample: successful
 '''
 
 
-from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ansible_tower import TowerModule, tower_auth_config, tower_check_mode
+from ansible.module_utils.six.moves import cStringIO as StringIO
 
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
 
 try:
     import tower_cli
-    import tower_cli.utils.exceptions as exc
+    import tower_cli.exceptions as exc
 
     from tower_cli.conf import settings
-    from ansible.module_utils.ansible_tower import (
-        tower_auth_config,
-        tower_check_mode,
-        tower_argument_spec,
-    )
-
-    HAS_TOWER_CLI = True
 except ImportError:
-    HAS_TOWER_CLI = False
+    pass
 
 
 def main():
-    argument_spec = tower_argument_spec()
-    argument_spec.update(dict(
-        job_id = dict(type='int', required=True),
-        timeout = dict(type='int'),
-        min_interval = dict(type='float', default=1),
-        max_interval = dict(type='float', default=30),
-    ))
+    argument_spec = dict(
+        job_id=dict(type='int', required=True),
+        timeout=dict(type='int'),
+        min_interval=dict(type='float', default=1),
+        max_interval=dict(type='float', default=30),
+    )
 
-    module = AnsibleModule(
+    module = TowerModule(
         argument_spec,
         supports_check_mode=True
     )
-
-    if not HAS_TOWER_CLI:
-        module.fail_json(msg='ansible-tower-cli required for this module')
 
     json_output = {}
     fail_json = None
@@ -139,7 +118,7 @@ def main():
         params = module.params.copy()
 
         # tower-cli gets very noisy when monitoring.
-        # We pass in our our outfile to supress the out during our monitor call.
+        # We pass in our our outfile to suppress the out during our monitor call.
         outfile = StringIO()
         params['outfile'] = outfile
 

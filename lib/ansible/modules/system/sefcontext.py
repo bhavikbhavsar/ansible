@@ -1,131 +1,160 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
-# (c) 2016, Dag Wieers <dag@wieers.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: (c) 2016, Dag Wieers (@dagwieers) <dag@wieers.com>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
-DOCUMENTATION = '''
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
+DOCUMENTATION = r'''
 ---
 module: sefcontext
 short_description: Manages SELinux file context mapping definitions
 description:
-     - Manages SELinux file context mapping definitions
-     - Similar to the C(semanage fcontext) command
-version_added: "2.2"
+- Manages SELinux file context mapping definitions.
+- Similar to the C(semanage fcontext) command.
+version_added: '2.2'
 options:
   target:
     description:
-      - Target path (expression).
-    required: true
-    default: null
-    aliases: ['path']
+    - Target path (expression).
+    type: str
+    required: yes
+    aliases: [ path ]
   ftype:
     description:
-      - File type.
-    required: false
+    - The file type that should have SELinux contexts applied.
+    - "The following file type options are available:"
+    - C(a) for all files,
+    - C(b) for block devices,
+    - C(c) for character devices,
+    - C(d) for directories,
+    - C(f) for regular files,
+    - C(l) for symbolic links,
+    - C(p) for named pipes,
+    - C(s) for socket files.
+    type: str
+    choices: [ a, b, c, d, f, l, p, s ]
     default: a
   setype:
     description:
-      - SELinux type for the specified target.
-    required: true
-    default: null
+    - SELinux type for the specified target.
+    type: str
+    required: yes
   seuser:
     description:
-      - SELinux user for the specified target.
-    required: false
-    default: null
+    - SELinux user for the specified target.
+    type: str
   selevel:
     description:
-      - SELinux range for the specified target.
-    required: false
-    default: null
-    aliases: ['serange']
+    - SELinux range for the specified target.
+    type: str
+    aliases: [ serange ]
   state:
     description:
-      - Desired boolean value.
-    required: false
+    - Whether the SELinux file context must be C(absent) or C(present).
+    type: str
+    choices: [ absent, present ]
     default: present
-    choices: [ 'present', 'absent' ]
   reload:
     description:
-      - Reload SELinux policy after commit.
-    required: false
+    - Reload SELinux policy after commit.
+    - Note that this does not apply SELinux file contexts to existing files.
+    type: bool
     default: yes
+  ignore_selinux_state:
+    description:
+    - Useful for scenarios (chrooted environment) that you can't get the real SELinux state.
+    type: bool
+    default: no
+    version_added: '2.8'
 notes:
-   - The changes are persistent across reboots
-requirements: [ 'libselinux-python', 'policycoreutils-python' ]
-author: Dag Wieers
+- The changes are persistent across reboots.
+- The M(sefcontext) module does not modify existing files to the new
+  SELinux context(s), so it is advisable to first create the SELinux
+  file contexts before creating files, or run C(restorecon) manually
+  for the existing files that require the new SELinux file contexts.
+- Not applying SELinux fcontexts to existing files is a deliberate
+  decision as it would be unclear what reported changes would entail
+  to, and there's no guarantee that applying SELinux fcontext does
+  not pick up other unrelated prior changes.
+requirements:
+- libselinux-python
+- policycoreutils-python
+author:
+- Dag Wieers (@dagwieers)
 '''
 
-EXAMPLES = '''
-# Allow apache to modify files in /srv/git_repos
-- sefcontext:
+EXAMPLES = r'''
+- name: Allow apache to modify files in /srv/git_repos
+  sefcontext:
     target: '/srv/git_repos(/.*)?'
     setype: httpd_git_rw_content_t
     state: present
+
+- name: Apply new SELinux file context to filesystem
+  command: restorecon -irv /srv/git_repos
 '''
 
-RETURN = '''
+RETURN = r'''
 # Default return values
 '''
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.pycompat24 import get_exception
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule, missing_required_lib
 from ansible.module_utils._text import to_native
 
+SELINUX_IMP_ERR = None
 try:
     import selinux
-    HAVE_SELINUX=True
+    HAVE_SELINUX = True
 except ImportError:
-    HAVE_SELINUX=False
+    SELINUX_IMP_ERR = traceback.format_exc()
+    HAVE_SELINUX = False
 
+SEOBJECT_IMP_ERR = None
 try:
     import seobject
-    HAVE_SEOBJECT=True
+    HAVE_SEOBJECT = True
 except ImportError:
-    HAVE_SEOBJECT=False
+    SEOBJECT_IMP_ERR = traceback.format_exc()
+    HAVE_SEOBJECT = False
 
-### Add missing entries (backward compatible)
+# Add missing entries (backward compatible)
 if HAVE_SEOBJECT:
-    seobject.file_types.update(dict(
-        a = seobject.SEMANAGE_FCONTEXT_ALL,
-        b = seobject.SEMANAGE_FCONTEXT_BLOCK,
-        c = seobject.SEMANAGE_FCONTEXT_CHAR,
-        d = seobject.SEMANAGE_FCONTEXT_DIR,
-        f = seobject.SEMANAGE_FCONTEXT_REG,
-        l = seobject.SEMANAGE_FCONTEXT_LINK,
-        p = seobject.SEMANAGE_FCONTEXT_PIPE,
-        s = seobject.SEMANAGE_FCONTEXT_SOCK,
-    ))
+    seobject.file_types.update(
+        a=seobject.SEMANAGE_FCONTEXT_ALL,
+        b=seobject.SEMANAGE_FCONTEXT_BLOCK,
+        c=seobject.SEMANAGE_FCONTEXT_CHAR,
+        d=seobject.SEMANAGE_FCONTEXT_DIR,
+        f=seobject.SEMANAGE_FCONTEXT_REG,
+        l=seobject.SEMANAGE_FCONTEXT_LINK,
+        p=seobject.SEMANAGE_FCONTEXT_PIPE,
+        s=seobject.SEMANAGE_FCONTEXT_SOCK,
+    )
 
-### Make backward compatible
+# Make backward compatible
 option_to_file_type_str = dict(
-    a = 'all files',
-    b = 'block device',
-    c = 'character device',
-    d = 'directory',
-    f = 'regular file',
-    l = 'symbolic link',
-    p = 'named pipe',
-    s = 'socket file',
+    a='all files',
+    b='block device',
+    c='character device',
+    d='directory',
+    f='regular file',
+    l='symbolic link',
+    p='named pipe',
+    s='socket file',
 )
+
+
+def get_runtime_status(ignore_selinux_state=False):
+    return True if ignore_selinux_state is True else selinux.is_selinux_enabled()
+
 
 def semanage_fcontext_exists(sefcontext, target, ftype):
     ''' Get the SELinux file context mapping definition from policy. Return None if it does not exist. '''
@@ -137,6 +166,7 @@ def semanage_fcontext_exists(sefcontext, target, ftype):
         return records[record]
     except KeyError:
         return None
+
 
 def semanage_fcontext_modify(module, result, target, ftype, setype, do_reload, serange, seuser, sestore=''):
     ''' Add or modify SELinux file context mapping definition to the policy. '''
@@ -181,14 +211,14 @@ def semanage_fcontext_modify(module, result, target, ftype, setype, do_reload, s
                 prepared_diff += '# Addition to semanage file context mappings\n'
                 prepared_diff += '+%s      %s      %s:%s:%s:%s\n' % (target, ftype, seuser, 'object_r', setype, serange)
 
-    except Exception:
-        e = get_exception()
+    except Exception as e:
         module.fail_json(msg="%s: %s\n" % (e.__class__.__name__, to_native(e)))
 
     if module._diff and prepared_diff:
         result['diff'] = dict(prepared=prepared_diff)
 
     module.exit_json(changed=changed, seuser=seuser, serange=serange, **result)
+
 
 def semanage_fcontext_delete(module, result, target, ftype, do_reload, sestore=''):
     ''' Delete SELinux file context mapping definition from the policy. '''
@@ -212,8 +242,7 @@ def semanage_fcontext_delete(module, result, target, ftype, do_reload, sestore='
                 prepared_diff += '# Deletion to semanage file context mappings\n'
                 prepared_diff += '-%s      %s      %s:%s:%s:%s\n' % (target, ftype, exists[0], exists[1], exists[2], exists[3])
 
-    except Exception:
-        e = get_exception()
+    except Exception as e:
         module.fail_json(msg="%s: %s\n" % (e.__class__.__name__, to_native(e)))
 
     if module._diff and prepared_diff:
@@ -224,24 +253,27 @@ def semanage_fcontext_delete(module, result, target, ftype, do_reload, sestore='
 
 def main():
     module = AnsibleModule(
-        argument_spec = dict(
-            target  = dict(required=True, aliases=['path']),
-            ftype   = dict(required=False, choices=option_to_file_type_str.keys(), default='a'),
-            setype  = dict(required=True),
-            seuser  = dict(required=False, default=None),
-            selevel = dict(required=False, default=None, aliases=['serange']),
-            state   = dict(required=False, choices=['present', 'absent'], default='present'),
-            reload  = dict(required=False, type='bool', default='yes'),
+        argument_spec=dict(
+            ignore_selinux_state=dict(type='bool', default=False),
+            target=dict(type='str', required=True, aliases=['path']),
+            ftype=dict(type='str', default='a', choices=option_to_file_type_str.keys()),
+            setype=dict(type='str', required=True),
+            seuser=dict(type='str'),
+            selevel=dict(type='str', aliases=['serange']),
+            state=dict(type='str', default='present', choices=['absent', 'present']),
+            reload=dict(type='bool', default=True),
         ),
-        supports_check_mode = True,
+        supports_check_mode=True,
     )
     if not HAVE_SELINUX:
-        module.fail_json(msg="This module requires libselinux-python")
+        module.fail_json(msg=missing_required_lib("libselinux-python"), exception=SELINUX_IMP_ERR)
 
     if not HAVE_SEOBJECT:
-        module.fail_json(msg="This module requires policycoreutils-python")
+        module.fail_json(msg=missing_required_lib("policycoreutils-python"), exception=SEOBJECT_IMP_ERR)
 
-    if not selinux.is_selinux_enabled():
+    ignore_selinux_state = module.params['ignore_selinux_state']
+
+    if not get_runtime_status(ignore_selinux_state):
         module.fail_json(msg="SELinux is disabled on this host.")
 
     target = module.params['target']

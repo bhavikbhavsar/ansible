@@ -1,24 +1,15 @@
 #!/usr/bin/python
 # Copyright 2017 Google Inc.
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 DOCUMENTATION = '''
 module: gce_eip
 version_added: "2.3"
@@ -51,44 +42,50 @@ options:
 
 EXAMPLES = '''
 # Create a Global external IP address
-gce_eip:
-  service_account_email: "{{ service_account_email }}"
-  credentials_file: "{{ credentials_file }}"
-  project_id: "{{ project_id }}"
-  name: my-global-ip
-  region: global
-  state: present
+- gce_eip:
+    service_account_email: "{{ service_account_email }}"
+    credentials_file: "{{ credentials_file }}"
+    project_id: "{{ project_id }}"
+    name: my-global-ip
+    region: global
+    state: present
 
 # Create a Regional external IP address
-gce_eip:
-  service_account_email: "{{ service_account_email }}"
-  credentials_file: "{{ credentials_file }}"
-  project_id: "{{ project_id }}"
-  name: my-global-ip
-  region: us-east1
-  state: present
+- gce_eip:
+    service_account_email: "{{ service_account_email }}"
+    credentials_file: "{{ credentials_file }}"
+    project_id: "{{ project_id }}"
+    name: my-global-ip
+    region: us-east1
+    state: present
 '''
 
 RETURN = '''
 address:
     description: IP address being operated on
     returned: always
-    type: string
+    type: str
     sample: "35.186.222.233"
 name:
     description: name of the address being operated on
     returned: always
-    type: string
+    type: str
     sample: "my-address"
 region:
     description: Which region an address belongs.
     returned: always
-    type: string
+    type: str
     sample: "global"
 '''
 
 USER_AGENT_VERSION = 'v1'
 USER_AGENT_PRODUCT = 'Ansible-gce_eip'
+
+try:
+    from ast import literal_eval
+    HAS_PYTHON26 = True
+except ImportError:
+    HAS_PYTHON26 = False
 
 try:
     import libcloud
@@ -102,11 +99,9 @@ try:
 except ImportError:
     HAS_LIBCLOUD = False
 
-try:
-    from ast import literal_eval
-    HAS_PYTHON26 = True
-except ImportError:
-    HAS_PYTHON26 = False
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.gcp import gcp_connect
+
 
 def get_address(gce, name, region):
     """
@@ -126,6 +121,7 @@ def get_address(gce, name, region):
 
     except ResourceNotFoundError:
         return None
+
 
 def create_address(gce, params):
     """
@@ -152,6 +148,7 @@ def create_address(gce, params):
 
     return (changed, return_data)
 
+
 def delete_address(address):
     """
     Delete an Address.
@@ -172,6 +169,7 @@ def delete_address(address):
         return_data = address.address
     return (changed, return_data)
 
+
 def main():
     module = AnsibleModule(argument_spec=dict(
         name=dict(required=True),
@@ -179,8 +177,8 @@ def main():
         region=dict(required=True),
         service_account_email=dict(),
         service_account_permissions=dict(type='list'),
-        pem_file=dict(),
-        credentials_file=dict(),
+        pem_file=dict(type='path'),
+        credentials_file=dict(type='path'),
         project_id=dict(), ), )
 
     if not HAS_PYTHON26:
@@ -225,8 +223,6 @@ def main():
     json_output.update(params)
     module.exit_json(**json_output)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.gcp import gcp_connect
+
 if __name__ == '__main__':
     main()

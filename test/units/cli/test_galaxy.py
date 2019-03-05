@@ -19,20 +19,22 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
+import ansible
 import os
 import shutil
 import tarfile
 import tempfile
 import yaml
 
-from ansible.compat.six import PY3
-from ansible.compat.tests import unittest
-from ansible.compat.tests.mock import call, patch
-
-import ansible
-from ansible.errors import AnsibleError, AnsibleOptionsError
-
+from ansible import context
+from ansible.cli.arguments import optparse_helpers as opt_help
 from ansible.cli.galaxy import GalaxyCLI
+from ansible.errors import AnsibleError, AnsibleOptionsError
+from ansible.module_utils.six import PY3
+from ansible.utils import context_objects as co
+from units.compat import unittest
+from units.compat.mock import call, patch
+
 
 class TestGalaxy(unittest.TestCase):
     @classmethod
@@ -40,12 +42,14 @@ class TestGalaxy(unittest.TestCase):
         '''creating prerequisites for installing a role; setUpClass occurs ONCE whereas setUp occurs with every method tested.'''
         # class data for easy viewing: role_dir, role_tar, role_name, role_req, role_path
 
+        cls.temp_dir = tempfile.mkdtemp(prefix='ansible-test_galaxy-')
+        os.chdir(cls.temp_dir)
+
         if os.path.exists("./delete_me"):
             shutil.rmtree("./delete_me")
 
         # creating framework for a role
-        gc = GalaxyCLI(args=["init", "--offline", "delete_me"])
-        gc.parse()
+        gc = GalaxyCLI(args=["ansible-galaxy", "init", "--offline", "delete_me"])
         gc.run()
         cls.role_dir = "./delete_me"
         cls.role_name = "delete_me"
@@ -72,7 +76,7 @@ class TestGalaxy(unittest.TestCase):
         try:
             tar = tarfile.open(output_file, "w:gz")
             tar.add(source_dir, arcname=os.path.basename(source_dir))
-        except AttributeError: # tarfile obj. has no attribute __exit__ prior to python 2.    7
+        except AttributeError:  # tarfile obj. has no attribute __exit__ prior to python 2.    7
             pass
         finally:  # ensuring closure of tarfile obj
             tar.close()
@@ -90,8 +94,17 @@ class TestGalaxy(unittest.TestCase):
         if os.path.isdir(cls.role_path):
             shutil.rmtree(cls.role_path)
 
+        os.chdir('/')
+        shutil.rmtree(cls.temp_dir)
+
     def setUp(self):
-        self.default_args = []
+        # Reset the stored command line args
+        co.GlobalCLIArgs._Singleton__instance = None
+        self.default_args = ['ansible-galaxy']
+
+    def tearDown(self):
+        # Reset the stored command line args
+        co.GlobalCLIArgs._Singleton__instance = None
 
     def test_init(self):
         galaxy_cli = GalaxyCLI(args=self.default_args)
@@ -101,7 +114,7 @@ class TestGalaxy(unittest.TestCase):
         gc = GalaxyCLI(args=self.default_args)
         role_info = {'name': 'some_role_name'}
         display_result = gc._display_role_info(role_info)
-        self.assertTrue(display_result.find('some_role_name') >-1)
+        self.assertTrue(display_result.find('some_role_name') > -1)
 
     def test_display_galaxy_info(self):
         gc = GalaxyCLI(args=self.default_args)
@@ -114,29 +127,29 @@ class TestGalaxy(unittest.TestCase):
 
     def test_run(self):
         ''' verifies that the GalaxyCLI object's api is created and that execute() is called. '''
-        gc = GalaxyCLI(args=["install", "--ignore-errors", "imaginary_role"])
-        gc.parse()
+        gc = GalaxyCLI(args=["ansible-galaxy", "install", "--ignore-errors", "imaginary_role"])
         with patch.object(ansible.cli.CLI, "execute", return_value=None) as mock_ex:
             with patch.object(ansible.cli.CLI, "run", return_value=None) as mock_run:
                 gc.run()
-
                 # testing
+                self.assertIsInstance(gc.galaxy, ansible.galaxy.Galaxy)
                 self.assertEqual(mock_run.call_count, 1)
                 self.assertTrue(isinstance(gc.api, ansible.galaxy.api.GalaxyAPI))
                 self.assertEqual(mock_ex.call_count, 1)
 
     def test_execute_remove(self):
         # installing role
-        gc = GalaxyCLI(args=["install", "--offline", "-p", self.role_path, "-r", self.role_req])
-        gc.parse()
+        gc = GalaxyCLI(args=["ansible-galaxy", "install", "-p", self.role_path, "-r", self.role_req, '--force'])
         gc.run()
 
         # location where the role was installed
         role_file = os.path.join(self.role_path, self.role_name)
 
         # removing role
-        gc = GalaxyCLI(args=["remove", "-p", role_file, self.role_name])
-        gc.parse()
+        # Have to reset the arguments in the context object manually since we're doing the
+        # equivalent of running the command line program twice
+        co.GlobalCLIArgs._Singleton__instance = None
+        gc = GalaxyCLI(args=["ansible-galaxy", "remove", role_file, self.role_name])
         gc.run()
 
         # testing role was removed
@@ -145,8 +158,7 @@ class TestGalaxy(unittest.TestCase):
 
     def test_exit_without_ignore_without_flag(self):
         ''' tests that GalaxyCLI exits with the error specified if the --ignore-errors flag is not used '''
-        gc = GalaxyCLI(args=["install", "--server=None", "fake_role_name"])
-        gc.parse()
+        gc = GalaxyCLI(args=["ansible-galaxy", "install", "--server=None", "fake_role_name"])
         with patch.object(ansible.utils.display.Display, "display", return_value=None) as mocked_display:
             # testing that error expected is raised
             self.assertRaises(AnsibleError, gc.run)
@@ -155,19 +167,17 @@ class TestGalaxy(unittest.TestCase):
     def test_exit_without_ignore_with_flag(self):
         ''' tests that GalaxyCLI exits without the error specified if the --ignore-errors flag is used  '''
         # testing with --ignore-errors flag
-        gc = GalaxyCLI(args=["install", "--server=None", "fake_role_name", "--ignore-errors"])
-        gc.parse()
+        gc = GalaxyCLI(args=["ansible-galaxy", "install", "--server=None", "fake_role_name", "--ignore-errors"])
         with patch.object(ansible.utils.display.Display, "display", return_value=None) as mocked_display:
             gc.run()
             self.assertTrue(mocked_display.called_once_with("- downloading role 'fake_role_name', owned by "))
 
     def run_parse_common(self, galaxycli_obj, action):
-        with patch.object(ansible.cli.SortedOptParser, "set_usage") as mocked_usage:
+        with patch.object(opt_help.SortedOptParser, "set_usage") as mocked_usage:
             galaxycli_obj.parse()
 
             # checking that the common results of parse() for all possible actions have been created/called
-            self.assertIsInstance(galaxycli_obj.parser, ansible.cli.SortedOptParser)
-            self.assertIsInstance(galaxycli_obj.galaxy, ansible.galaxy.Galaxy)
+            self.assertIsInstance(galaxycli_obj.parser, opt_help.SortedOptParser)
             formatted_call = {
                 'import': 'usage: %prog import [options] github_user github_repo',
                 'delete': 'usage: %prog delete [options] github_user github_repo',
@@ -189,86 +199,86 @@ class TestGalaxy(unittest.TestCase):
 
     def test_parse_no_action(self):
         ''' testing the options parser when no action is given '''
-        gc = GalaxyCLI(args=[""])
+        gc = GalaxyCLI(args=["ansible-galaxy", ""])
         self.assertRaises(AnsibleOptionsError, gc.parse)
 
     def test_parse_invalid_action(self):
         ''' testing the options parser when an invalid action is given '''
-        gc = GalaxyCLI(args=["NOT_ACTION"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "NOT_ACTION"])
         self.assertRaises(AnsibleOptionsError, gc.parse)
 
     def test_parse_delete(self):
         ''' testing the options parser when the action 'delete' is given '''
-        gc = GalaxyCLI(args=["delete"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "delete"])
         self.run_parse_common(gc, "delete")
-        self.assertEqual(gc.options.verbosity, 0)
+        self.assertEqual(context.CLIARGS['verbosity'], 0)
 
     def test_parse_import(self):
         ''' testing the options parser when the action 'import' is given '''
-        gc = GalaxyCLI(args=["import"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "import"])
         self.run_parse_common(gc, "import")
-        self.assertEqual(gc.options.wait, True)
-        self.assertEqual(gc.options.reference, None)
-        self.assertEqual(gc.options.check_status, False)
-        self.assertEqual(gc.options.verbosity, 0)
+        self.assertEqual(context.CLIARGS['wait'], True)
+        self.assertEqual(context.CLIARGS['reference'], None)
+        self.assertEqual(context.CLIARGS['check_status'], False)
+        self.assertEqual(context.CLIARGS['verbosity'], 0)
 
     def test_parse_info(self):
         ''' testing the options parser when the action 'info' is given '''
-        gc = GalaxyCLI(args=["info"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "info"])
         self.run_parse_common(gc, "info")
-        self.assertEqual(gc.options.offline, False)
+        self.assertEqual(context.CLIARGS['offline'], False)
 
     def test_parse_init(self):
         ''' testing the options parser when the action 'init' is given '''
-        gc = GalaxyCLI(args=["init"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "init"])
         self.run_parse_common(gc, "init")
-        self.assertEqual(gc.options.offline, False)
-        self.assertEqual(gc.options.force, False)
+        self.assertEqual(context.CLIARGS['offline'], False)
+        self.assertEqual(context.CLIARGS['force'], False)
 
     def test_parse_install(self):
         ''' testing the options parser when the action 'install' is given '''
-        gc = GalaxyCLI(args=["install"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "install"])
         self.run_parse_common(gc, "install")
-        self.assertEqual(gc.options.ignore_errors, False)
-        self.assertEqual(gc.options.no_deps, False)
-        self.assertEqual(gc.options.role_file, None)
-        self.assertEqual(gc.options.force, False)
+        self.assertEqual(context.CLIARGS['ignore_errors'], False)
+        self.assertEqual(context.CLIARGS['no_deps'], False)
+        self.assertEqual(context.CLIARGS['role_file'], None)
+        self.assertEqual(context.CLIARGS['force'], False)
 
     def test_parse_list(self):
         ''' testing the options parser when the action 'list' is given '''
-        gc = GalaxyCLI(args=["list"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "list"])
         self.run_parse_common(gc, "list")
-        self.assertEqual(gc.options.verbosity, 0)
+        self.assertEqual(context.CLIARGS['verbosity'], 0)
 
     def test_parse_login(self):
         ''' testing the options parser when the action 'login' is given '''
-        gc = GalaxyCLI(args=["login"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "login"])
         self.run_parse_common(gc, "login")
-        self.assertEqual(gc.options.verbosity, 0)
-        self.assertEqual(gc.options.token, None)
+        self.assertEqual(context.CLIARGS['verbosity'], 0)
+        self.assertEqual(context.CLIARGS['token'], None)
 
     def test_parse_remove(self):
         ''' testing the options parser when the action 'remove' is given '''
-        gc = GalaxyCLI(args=["remove"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "remove"])
         self.run_parse_common(gc, "remove")
-        self.assertEqual(gc.options.verbosity, 0)
+        self.assertEqual(context.CLIARGS['verbosity'], 0)
 
     def test_parse_search(self):
         ''' testing the options parswer when the action 'search' is given '''
-        gc = GalaxyCLI(args=["search"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "search"])
         self.run_parse_common(gc, "search")
-        self.assertEqual(gc.options.platforms, None)
-        self.assertEqual(gc.options.galaxy_tags, None)
-        self.assertEqual(gc.options.author, None)
+        self.assertEqual(context.CLIARGS['platforms'], None)
+        self.assertEqual(context.CLIARGS['galaxy_tags'], None)
+        self.assertEqual(context.CLIARGS['author'], None)
 
     def test_parse_setup(self):
         ''' testing the options parser when the action 'setup' is given '''
-        gc = GalaxyCLI(args=["setup"])
+        gc = GalaxyCLI(args=["ansible-galaxy", "setup"])
         self.run_parse_common(gc, "setup")
 
-        self.assertEqual(gc.options.verbosity, 0)
-        self.assertEqual(gc.options.remove_id, None)
-        self.assertEqual(gc.options.setup_list, False)
+        self.assertEqual(context.CLIARGS['verbosity'], 0)
+        self.assertEqual(context.CLIARGS['remove_id'], None)
+        self.assertEqual(context.CLIARGS['setup_list'], False)
 
 
 class ValidRoleTests(object):
@@ -293,8 +303,7 @@ class ValidRoleTests(object):
         cls.role_name = role_name
 
         # create role using default skeleton
-        gc = GalaxyCLI(args=['init', '-c', '--offline'] + galaxy_args + ['-p', cls.test_dir, cls.role_name])
-        gc.parse()
+        gc = GalaxyCLI(args=['ansible-galaxy', 'init', '-c', '--offline'] + galaxy_args + ['--init-path', cls.test_dir, cls.role_name])
         gc.run()
         cls.gc = gc
 
@@ -330,7 +339,7 @@ class ValidRoleTests(object):
             self.assertTrue(os.path.isdir(os.path.join(self.role_dir, d)), msg="Expected role subdirectory {0} doesn't exist".format(d))
 
     def test_travis_yml(self):
-        with open(os.path.join(self.role_dir,'.travis.yml'), 'r') as f:
+        with open(os.path.join(self.role_dir, '.travis.yml'), 'r') as f:
             contents = f.read()
 
         with open(os.path.join(self.role_skeleton_path, '.travis.yml'), 'r') as f:
@@ -369,16 +378,46 @@ class TestGalaxyInitDefault(unittest.TestCase, ValidRoleTests):
         self.assertEqual(metadata.get('galaxy_info', dict()).get('author'), 'your name', msg='author was not set properly in metadata')
 
 
-class TestGalaxyInitContainerEnabled(unittest.TestCase, ValidRoleTests):
+class TestGalaxyInitAPB(unittest.TestCase, ValidRoleTests):
 
     @classmethod
     def setUpClass(cls):
-        cls.setUpRole('delete_me_container', galaxy_args=['--container-enabled'])
+        cls.setUpRole('delete_me_apb', galaxy_args=['--type=apb'])
+
+    def test_metadata_apb_tag(self):
+        with open(os.path.join(self.role_dir, 'meta', 'main.yml'), 'r') as mf:
+            metadata = yaml.safe_load(mf)
+        self.assertIn('apb', metadata.get('galaxy_info', dict()).get('galaxy_tags', []), msg='apb tag not set in role metadata')
+
+    def test_metadata_contents(self):
+        with open(os.path.join(self.role_dir, 'meta', 'main.yml'), 'r') as mf:
+            metadata = yaml.safe_load(mf)
+        self.assertEqual(metadata.get('galaxy_info', dict()).get('author'), 'your name', msg='author was not set properly in metadata')
+
+    def test_apb_yml(self):
+        self.assertTrue(os.path.exists(os.path.join(self.role_dir, 'apb.yml')), msg='apb.yml was not created')
+
+    def test_test_yml(self):
+        with open(os.path.join(self.role_dir, 'tests', 'test.yml'), 'r') as f:
+            test_playbook = yaml.safe_load(f)
+        print(test_playbook)
+        self.assertEqual(len(test_playbook), 1)
+        self.assertEqual(test_playbook[0]['hosts'], 'localhost')
+        self.assertFalse(test_playbook[0]['gather_facts'])
+        self.assertEqual(test_playbook[0]['connection'], 'local')
+        self.assertIsNone(test_playbook[0]['tasks'], msg='We\'re expecting an unset list of tasks in test.yml')
+
+
+class TestGalaxyInitContainer(unittest.TestCase, ValidRoleTests):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.setUpRole('delete_me_container', galaxy_args=['--type=container'])
 
     def test_metadata_container_tag(self):
         with open(os.path.join(self.role_dir, 'meta', 'main.yml'), 'r') as mf:
             metadata = yaml.safe_load(mf)
-        self.assertIn('container', metadata.get('galaxy_info', dict()).get('galaxy_tags',[]), msg='container tag not set in role metadata')
+        self.assertIn('container', metadata.get('galaxy_info', dict()).get('galaxy_tags', []), msg='container tag not set in role metadata')
 
     def test_metadata_contents(self):
         with open(os.path.join(self.role_dir, 'meta', 'main.yml'), 'r') as mf:
@@ -431,4 +470,4 @@ class TestGalaxyInitSkeleton(unittest.TestCase, ValidRoleTests):
         self.assertTrue(os.path.exists(os.path.join(self.role_dir, 'templates_extra', 'templates.txt')))
 
     def test_skeleton_option(self):
-        self.assertEquals(self.role_skeleton_path, self.gc.get_opt('role_skeleton'), msg='Skeleton path was not parsed properly from the command line')
+        self.assertEquals(self.role_skeleton_path, context.CLIARGS['role_skeleton'], msg='Skeleton path was not parsed properly from the command line')

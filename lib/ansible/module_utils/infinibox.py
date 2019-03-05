@@ -50,7 +50,7 @@ def api_wrapper(func):
             module.fail_json(msg=e.message)
         except core.exceptions.SystemNotFoundException as e:
             module.fail_json(msg=e.message)
-        except:
+        except Exception:
             raise
     return __wrapper
 
@@ -82,9 +82,9 @@ def infinibox_argument_spec():
     """Return standard base dictionary used for the argument_spec argument in AnsibleModule"""
 
     return dict(
-        system = dict(required=True),
-        user = dict(),
-        password = dict(no_log=True),
+        system=dict(required=True),
+        user=dict(),
+        password=dict(no_log=True),
     )
 
 

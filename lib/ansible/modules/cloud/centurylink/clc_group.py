@@ -2,26 +2,16 @@
 
 #
 # Copyright (c) 2015 CenturyLink
-#
-# This file is part of Ansible.
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>
-#
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 module: clc_group
@@ -55,7 +45,7 @@ options:
   wait:
     description:
       - Whether to wait for the tasks to finish before returning.
-    choices: [ True, False ]
+    type: bool
     default: True
     required: False
 requirements:
@@ -218,11 +208,14 @@ group:
 __version__ = '${version}'
 
 import os
+import traceback
 from distutils.version import LooseVersion
 
+REQUESTS_IMP_ERR = None
 try:
     import requests
 except ImportError:
+    REQUESTS_IMP_ERR = traceback.format_exc()
     REQUESTS_FOUND = False
 else:
     REQUESTS_FOUND = True
@@ -231,16 +224,18 @@ else:
 #  Requires the clc-python-sdk.
 #  sudo pip install clc-sdk
 #
+CLC_IMP_ERR = None
 try:
     import clc as clc_sdk
     from clc import CLCException
 except ImportError:
+    CLC_IMP_ERR = traceback.format_exc()
     CLC_FOUND = False
     clc_sdk = None
 else:
     CLC_FOUND = True
 
-from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.basic import AnsibleModule, missing_required_lib
 
 
 class ClcGroup(object):
@@ -257,11 +252,9 @@ class ClcGroup(object):
         self.group_dict = {}
 
         if not CLC_FOUND:
-            self.module.fail_json(
-                msg='clc-python-sdk required for this module')
+            self.module.fail_json(msg=missing_required_lib('clc-sdk'), exception=CLC_IMP_ERR)
         if not REQUESTS_FOUND:
-            self.module.fail_json(
-                msg='requests library is required for this module')
+            self.module.fail_json(msg=missing_required_lib('requests'), exception=REQUESTS_IMP_ERR)
         if requests.__version__ and LooseVersion(requests.__version__) < LooseVersion('2.5.0'):
             self.module.fail_json(
                 msg='requests library  version should be >= 2.5.0')
@@ -390,7 +383,8 @@ class ClcGroup(object):
             changed:  Boolean- whether a change was made,
             group:  A clc group object for the group
         """
-        assert self.root_group, "Implementation Error: Root Group not set"
+        if not self.root_group:
+            raise AssertionError("Implementation Error: Root Group not set")
         parent = parent_name if parent_name is not None else self.root_group.name
         description = group_description
         changed = False

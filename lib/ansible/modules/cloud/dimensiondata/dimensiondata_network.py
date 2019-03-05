@@ -2,31 +2,21 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (c) 2016 Dimension Data
-#
-# This module is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this software.  If not, see <http://www.gnu.org/licenses/>.
-#
 # Authors:
 #   - Aimon Bustardo <aimon.bustardo@dimensiondata.com>
 #   - Bert Diwa      <Lamberto.Diwa@dimensiondata.com>
 #   - Adam Friedman  <tintoy@tintoy.io>
 #
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'community',
-    'version': '1.0'
-}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -50,7 +40,7 @@ options:
     required: false
   service_plan:
     description:
-      - The service plan, either “ESSENTIALS” or “ADVANCED”.
+      - The service plan, either "ESSENTIALS" or "ADVANCED".
       - MCP 2.0 Only.
     choices: [ESSENTIALS, ADVANCED]
     default: ESSENTIALS
@@ -87,48 +77,46 @@ RETURN = '''
 network:
     description: Dictionary describing the network.
     returned: On success when I(state=present).
-    type: dictionary
+    type: complex
     contains:
         id:
             description: Network ID.
-            type: string
+            type: str
             sample: "8c787000-a000-4050-a215-280893411a7d"
         name:
             description: Network name.
-            type: string
+            type: str
             sample: "My network"
         description:
             description: Network description.
-            type: string
+            type: str
             sample: "My network description"
         location:
             description: Datacenter location.
-            type: string
+            type: str
             sample: NA3
         status:
             description: Network status. (MCP 2.0 only)
-            type: string
+            type: str
             sample: NORMAL
         private_net:
             description: Private network subnet. (MCP 1.0 only)
-            type: string
+            type: str
             sample: "10.2.3.0"
         multicast:
             description: Multicast enabled? (MCP 1.0 only)
-            type: boolean
+            type: bool
             sample: false
 '''
-
+import traceback
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.dimensiondata import DimensionDataModule, DimensionDataAPIException
-from ansible.module_utils.pycompat24 import get_exception
-try:
-    from libcloud.compute.base import NodeLocation
+from ansible.module_utils.dimensiondata import HAS_LIBCLOUD, DimensionDataModule
+from ansible.module_utils._text import to_native
 
-    HAS_LIBCLOUD = True
-except ImportError:
-    HAS_LIBCLOUD = False
+if HAS_LIBCLOUD:
+    from libcloud.compute.base import NodeLocation
+    from libcloud.common.dimensiondata import DimensionDataAPIException
 
 
 class DimensionDataNetworkModule(DimensionDataModule):
@@ -168,8 +156,6 @@ class DimensionDataNetworkModule(DimensionDataModule):
                 network=self._network_to_dict(network)
             )
 
-            return
-
         network = self._create_network()
 
         self.module.exit_json(
@@ -187,8 +173,6 @@ class DimensionDataNetworkModule(DimensionDataModule):
                 msg='Network "%s" does not exist' % self.name,
                 network=self._network_to_dict(network)
             )
-
-            return
 
         self._delete_network(network)
 
@@ -235,8 +219,6 @@ class DimensionDataNetworkModule(DimensionDataModule):
                 msg='service_plan required when creating network and location is MCP 2.0'
             )
 
-            return None
-
         # Create network
         try:
             if self.mcp_version == '1.0':
@@ -252,14 +234,11 @@ class DimensionDataNetworkModule(DimensionDataModule):
                     self.module.params['service_plan'],
                     description=self.description
                 )
-        except DimensionDataAPIException:
-            api_exception = get_exception()
+        except DimensionDataAPIException as e:
 
             self.module.fail_json(
-                msg="Failed to create new network: %s" % str(api_exception)
+                msg="Failed to create new network: %s" % to_native(e), exception=traceback.format_exc()
             )
-
-            return None
 
         if self.module.params['wait'] is True:
             network = self._wait_for_network_state(network.id, 'NORMAL')
@@ -283,11 +262,9 @@ class DimensionDataNetworkModule(DimensionDataModule):
                 "Unexpected failure deleting network with id %s", network.id
             )
 
-        except DimensionDataAPIException:
-            api_exception = get_exception()
-
+        except DimensionDataAPIException as e:
             self.module.fail_json(
-                msg="Failed to delete network: %s" % str(api_exception)
+                msg="Failed to delete network: %s" % to_native(e), exception=traceback.format_exc()
             )
 
     def _wait_for_network_state(self, net_id, state_to_wait_for):
@@ -299,11 +276,10 @@ class DimensionDataNetworkModule(DimensionDataModule):
                 self.module.params['wait_time'],
                 net_id
             )
-        except DimensionDataAPIException:
-            api_exception = get_exception()
-
+        except DimensionDataAPIException as e:
             self.module.fail_json(
-                msg='Network did not reach % state in time: %s' % (state_to_wait_for, api_exception.msg)
+                msg='Network did not reach % state in time: %s' % (state_to_wait_for, to_native(e)),
+                exception=traceback.format_exc()
             )
 
 
@@ -313,6 +289,7 @@ def main():
         module.state_present()
     elif module.state == 'absent':
         module.state_absent()
+
 
 if __name__ == '__main__':
     main()

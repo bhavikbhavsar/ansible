@@ -3,26 +3,16 @@
 # Copyright (c) 2016 Matt Davis, <mdavis@ansible.com>
 #                    Chris Houseknecht, <house@redhat.com>
 #
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -36,11 +26,6 @@ description:
     - Get facts for virtual machine images.
 
 options:
-    name:
-        description:
-            - Only show results for a specific security group.
-        default: null
-        required: false
     location:
         description:
             - Azure location value (ie. westus, eastus, eastus2, northcentralus, etc.). Supplying only a
@@ -49,23 +34,15 @@ options:
     publisher:
         description:
             - Name of an image publisher. List image offerings associated with a particular publisher.
-        default: null
-        required: false
     offer:
         description:
             - Name of an image offering. Combine with sku to see a list of available image versions.
-        default: null
-        required: false
     sku:
         description:
             - Image offering SKU. Combine with offer to see a list of available versions.
-        default: null
-        required: false
     version:
         description:
             - Specific version number of an image.
-        default: null
-        required: false
 
 extends_documentation_fragment:
     - azure
@@ -111,17 +88,17 @@ azure_vmimages:
     example: []
 '''
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.azure_rm_common import *
-
 try:
     from msrestazure.azure_exceptions import CloudError
-    from azure.common import AzureMissingResourceHttpError, AzureHttpError
-except:
+except Exception:
     # This is handled in azure_rm_common
     pass
 
-AZURE_ENUM_MODULES = ['azure.mgmt.compute.models.compute_management_client_enums']
+from ansible.module_utils.azure_rm_common import AzureRMModuleBase
+
+
+AZURE_ENUM_MODULES = ['azure.mgmt.compute.models']
+
 
 class AzureRMVirtualMachineImageFacts(AzureRMModuleBase):
 
@@ -146,7 +123,7 @@ class AzureRMVirtualMachineImageFacts(AzureRMModuleBase):
         self.sku = None
         self.version = None
 
-        super(AzureRMVirtualMachineImageFacts, self).__init__(self.module_arg_spec)
+        super(AzureRMVirtualMachineImageFacts, self).__init__(self.module_arg_spec, supports_tags=False)
 
     def exec_module(self, **kwargs):
 
@@ -238,6 +215,6 @@ class AzureRMVirtualMachineImageFacts(AzureRMModuleBase):
 def main():
     AzureRMVirtualMachineImageFacts()
 
+
 if __name__ == '__main__':
     main()
-

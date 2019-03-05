@@ -2,25 +2,16 @@
 # -*- coding: utf-8 -*-
 
 # Copyright 2012 Dag Wieers <dag@wieers.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = '''
 ---
@@ -30,7 +21,7 @@ description:
      - This module prints statements during execution and can be useful
        for debugging variables or expressions without necessarily halting
        the playbook. Useful for debugging together with the 'when:' directive.
-
+     - This module is also supported for Windows targets.
 version_added: "0.8"
 options:
   msg:
@@ -42,12 +33,16 @@ options:
   var:
     description:
       - A variable name to debug.  Mutually exclusive with the 'msg' option.
+      - Be aware that this option already runs in Jinja2 context and has an implicit ``{{ }}`` wrapping,
+        so you should not be using Jinja2 delimiters unless you are looking for double interpolation.
   verbosity:
     description:
       - A number that controls when the debug is run, if you set to 3 it will only run debug when -vvv or above
     required: False
     default: 0
     version_added: "2.1"
+notes:
+    - This module is also supported for Windows targets.
 author:
     - "Dag Wieers (@dagwieers)"
     - "Michael DeHaan"
@@ -73,4 +68,10 @@ EXAMPLES = '''
   debug:
     var: hostvars[inventory_hostname]
     verbosity: 4
+
+# Example that prints two lines of messages, but only if there's an environment value set
+- debug:
+    msg:
+      - "Provisioning based on YOUR_KEY which is: '{{ lookup('env', 'YOUR_KEY') }}"
+      - "These servers were built using the password of '{{ password_used }}'. Please retain this for later use."
 '''

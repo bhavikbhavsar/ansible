@@ -1,27 +1,17 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
 
-ANSIBLE_METADATA = {
-    'status': ['stableinterface'],
-    'supported_by': 'community',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -30,7 +20,7 @@ short_description: Send a message to a Cisco Spark Room or Individual.
 description:
     - Send a message to a Cisco Spark Room or Individual with options to control the formatting.
 version_added: "2.3"
-author: Drew Rusell (@drusse11)
+author: Drew Rusell (@drew-russell)
 notes:
   - The C(recipient_id) type must be valid for the supplied C(recipient_id).
   - Full API documentation can be found at U(https://developer.ciscospark.com/endpoint-messages-post.html).
@@ -110,7 +100,7 @@ RETURN = """
 status_code:
   description:
     - The Response Code returned by the Spark API.
-    - Full Responsde Code explanations can be found at U(https://developer.ciscospark.com/endpoint-messages-post.html).
+    - Full Response Code explanations can be found at U(https://developer.ciscospark.com/endpoint-messages-post.html).
   returned: always
   type: int
   sample: 200
@@ -118,11 +108,13 @@ status_code:
 message:
     description:
       - The Response Message returned by the Spark API.
-      - Full Responsde Code explanations can be found at U(https://developer.ciscospark.com/endpoint-messages-post.html.
+      - Full Response Code explanations can be found at U(https://developer.ciscospark.com/endpoint-messages-post.html).
     returned: always
-    type: string
+    type: str
     sample: OK (585 bytes)
 """
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.urls import fetch_url
 
 
 def spark_message(module):
@@ -134,7 +126,7 @@ def spark_message(module):
     ansible = module.params
 
     headers = {
-        'Authorization': 'Bearer {}'.format(ansible['personal_token']),
+        'Authorization': 'Bearer {0}'.format(ansible['personal_token']),
         'content-type': 'application/json'
     }
 
@@ -196,7 +188,5 @@ def main():
     module.exit_json(**results)
 
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.urls import fetch_url
 if __name__ == "__main__":
     main()

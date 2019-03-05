@@ -24,19 +24,22 @@ import random
 import uuid
 
 from json import dumps
-from collections import MutableMapping
 
-from ansible.compat.six import iteritems, string_types
 
 from ansible import constants as C
+from ansible import context
 from ansible.errors import AnsibleError, AnsibleOptionsError
-from ansible.parsing.splitter import parse_kv
+from ansible.module_utils.six import iteritems, string_types
 from ansible.module_utils._text import to_native, to_text
+from ansible.module_utils.common._collections_compat import MutableMapping
+from ansible.parsing.splitter import parse_kv
 
-_MAXSIZE   = 2**32
-cur_id     = 0
-node_mac   = ("%012x" % uuid.getnode())[:12]
+
+_MAXSIZE = 2 ** 32
+cur_id = 0
+node_mac = ("%012x" % uuid.getnode())[:12]
 random_int = ("%08x" % random.randint(0, _MAXSIZE))[:8]
+
 
 def get_unique_id():
     global cur_id
@@ -48,6 +51,7 @@ def get_unique_id():
         random_int[4:8],
         ("%012x" % cur_id)[:12],
     ])
+
 
 def _validate_mutable_mappings(a, b):
     """
@@ -66,7 +70,7 @@ def _validate_mutable_mappings(a, b):
         for x in [a, b]:
             try:
                 myvars.append(dumps(x))
-            except:
+            except Exception:
                 myvars.append(to_native(x))
         raise AnsibleError("failed to combine variables, expected dicts but got a '{0}' and a '{1}': \n{2}\n{3}".format(
             a.__class__.__name__, b.__class__.__name__, myvars[0], myvars[1])
@@ -116,9 +120,9 @@ def merge_hash(a, b):
     return result
 
 
-def load_extra_vars(loader, options):
+def load_extra_vars(loader):
     extra_vars = {}
-    for extra_vars_opt in options.extra_vars:
+    for extra_vars_opt in context.CLIARGS.get('extra_vars', tuple()):
         data = None
         extra_vars_opt = to_text(extra_vars_opt, errors='surrogate_or_strict')
         if extra_vars_opt.startswith(u"@"):
@@ -139,18 +143,32 @@ def load_extra_vars(loader, options):
     return extra_vars
 
 
-def load_options_vars(options):
-    options_vars = {}
-    # For now only return check mode, but we can easily return more
-    # options if we need variables for them
-    options_vars['ansible_check_mode'] = options.check
+def load_options_vars(version):
+
+    if version is None:
+        version = 'Unknown'
+    options_vars = {'ansible_version': version}
+    attrs = {'check': 'check_mode',
+             'diff': 'diff_mode',
+             'forks': 'forks',
+             'inventory': 'inventory_sources',
+             'skip_tags': 'skip_tags',
+             'subset': 'limit',
+             'tags': 'run_tags',
+             'verbosity': 'verbosity'}
+
+    for attr, alias in attrs.items():
+        opt = context.CLIARGS.get(attr)
+        if opt is not None:
+            options_vars['ansible_%s' % alias] = opt
+
     return options_vars
 
 
 def isidentifier(ident):
     """
     Determines, if string is valid Python identifier using the ast module.
-    Orignally posted at: http://stackoverflow.com/a/29586366
+    Originally posted at: http://stackoverflow.com/a/29586366
     """
 
     if not isinstance(ident, string_types):

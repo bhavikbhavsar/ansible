@@ -1,84 +1,86 @@
 #!/usr/bin/python
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+# Copyright: (c) 2017, Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-DOCUMENTATION = '''
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'core'}
+
+DOCUMENTATION = r'''
 ---
 module: stat
 version_added: "1.3"
-short_description: retrieve file or file system status
+short_description: Retrieve file or file system status
 description:
-     - Retrieves facts for a file similar to the linux/unix 'stat' command.
+     - Retrieves facts for a file similar to the Linux/Unix 'stat' command.
+     - For Windows targets, use the M(win_stat) module instead.
 options:
   path:
     description:
-      - The full path of the file/object to get the facts of
+      - The full path of the file/object to get the facts of.
+    type: path
     required: true
-    default: null
   follow:
     description:
-      - Whether to follow symlinks
-    required: false
+      - Whether to follow symlinks.
+    type: bool
     default: no
   get_md5:
     description:
-      - Whether to return the md5 sum of the file.  Will return None if we're
-        unable to use md5 (Common for FIPS-140 compliant systems)
-    required: false
-    default: yes
+      - Whether to return the md5 sum of the file.
+      - Will return None if not a regular file or if we're
+        unable to use md5 (Common for FIPS-140 compliant systems).
+      - The default of this option changed from C(yes) to C(no) in Ansible 2.5
+        and will be removed altogether in Ansible 2.9.
+      - Use C(get_checksum=true) with C(checksum_algorithm=md5) to return an
+        md5 hash under the C(checksum) return value.
+    type: bool
+    default: no
   get_checksum:
     description:
-      - Whether to return a checksum of the file (default sha1)
-    required: false
+      - Whether to return a checksum of the file.
+    type: bool
     default: yes
     version_added: "1.8"
   checksum_algorithm:
     description:
-      - Algorithm to determine checksum of file. Will throw an error if the
-        host is unable to use specified algorithm.
-    required: false
-    choices: [ 'sha1', 'sha224', 'sha256', 'sha384', 'sha512' ]
+      - Algorithm to determine checksum of file.
+      - Will throw an error if the host is unable to use specified algorithm.
+      - The remote host has to support the hashing method specified, C(md5)
+        can be unavailable if the host is FIPS-140 compliant.
+    type: str
+    choices: [ md5, sha1, sha224, sha256, sha384, sha512 ]
     default: sha1
-    aliases: [ 'checksum_algo', 'checksum' ]
+    aliases: [ checksum, checksum_algo ]
     version_added: "2.0"
   get_mime:
     description:
       - Use file magic and return data about the nature of the file. this uses
         the 'file' utility found on most Linux/Unix systems.
       - This will add both `mime_type` and 'charset' fields to the return, if possible.
-      - In 2.3 this option changed from 'mime' to 'get_mime' and the default changed to 'Yes'
-    required: false
-    choices: [ Yes, No ]
-    default: Yes
+      - In Ansible 2.3 this option changed from 'mime' to 'get_mime' and the default changed to 'Yes'.
+    type: bool
+    default: yes
+    aliases: [ mime, mime_type, mime-type ]
     version_added: "2.1"
-    aliases: [ 'mime', 'mime_type', 'mime-type' ]
   get_attributes:
     description:
       - Get file attributes using lsattr tool if present.
-    required: false
-    default: True
+    type: bool
+    default: yes
+    aliases: [ attr, attributes ]
     version_added: "2.3"
-    aliases: [ 'attributes', 'attr' ]
-author: "Bruce Pennypacker (@bpennypacker)"
+seealso:
+- module: file
+- module: win_stat
+author: Bruce Pennypacker (@bpennypacker)
 '''
 
-EXAMPLES = '''
+EXAMPLES = r'''
 # Obtain the stats of /etc/foo.conf, and check that the file still belongs
 # to 'root'. Fail otherwise.
 - stat:
@@ -123,10 +125,10 @@ EXAMPLES = '''
     msg: "Path exists and is a directory"
   when: p.stat.isdir is defined and p.stat.isdir
 
-# Don't do md5 checksum
+# Don't do checksum
 - stat:
     path: /path/to/myhugefile
-    get_md5: no
+    get_checksum: no
 
 # Use sha256 to calculate checksum
 - stat:
@@ -134,21 +136,21 @@ EXAMPLES = '''
     checksum_algorithm: sha256
 '''
 
-RETURN = '''
+RETURN = r'''
 stat:
     description: dictionary containing all the stat data, some platforms might add additional fields
     returned: success
-    type: dictionary
+    type: complex
     contains:
         exists:
-            description: if the destination path actually exists or not
+            description: If the destination path actually exists or not
             returned: success
-            type: boolean
+            type: bool
             sample: True
         path:
             description: The full path of the file/object to get the facts of
             returned: success and if path exists
-            type: string
+            type: str
             sample: '/path/to/file'
         mode:
             description: Unix permissions of the file in octal
@@ -158,37 +160,37 @@ stat:
         isdir:
             description: Tells you if the path is a directory
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         ischr:
             description: Tells you if the path is a character device
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         isblk:
             description: Tells you if the path is a block device
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         isreg:
             description: Tells you if the path is a regular file
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         isfifo:
             description: Tells you if the path is a named pipe
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         islnk:
             description: Tells you if the path is a symbolic link
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         issock:
             description: Tells you if the path is a unix domain socket
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         uid:
             description: Numeric id representing the file owner
@@ -238,121 +240,128 @@ stat:
         wusr:
             description: Tells you if the owner has write permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         rusr:
             description: Tells you if the owner has read permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         xusr:
             description: Tells you if the owner has execute permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         wgrp:
             description: Tells you if the owner's group has write permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         rgrp:
             description: Tells you if the owner's group has read permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         xgrp:
             description: Tells you if the owner's group has execute permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         woth:
             description: Tells you if others have write permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         roth:
             description: Tells you if others have read permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         xoth:
             description: Tells you if others have execute permission
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: True
         isuid:
             description: Tells you if the invoking user's id matches the owner's id
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         isgid:
             description: Tells you if the invoking user's group id matches the owner's group id
             returned: success, path exists and user can read stats
-            type: boolean
+            type: bool
             sample: False
         lnk_source:
-            description: Original path
+            description: Target of the symlink normalized for the remote filesystem
             returned: success, path exists and user can read stats and the path is a symbolic link
-            type: string
+            type: str
             sample: /home/foobar/21102015-1445431274-908472971
+        lnk_target:
+            description: Target of the symlink.  Note that relative paths remain relative
+            returned: success, path exists and user can read stats and the path is a symbolic link
+            type: str
+            sample: ../foobar/21102015-1445431274-908472971
+            version_added: 2.4
         md5:
-            description: md5 hash of the path
+            description: md5 hash of the path; this will be removed in Ansible 2.9 in
+                favor of the checksum return value
             returned: success, path exists and user can read stats and path
                 supports hashing and md5 is supported
-            type: string
+            type: str
             sample: f88fa92d8cf2eeecf4c0a50ccc96d0c0
         checksum:
             description: hash of the path
             returned: success, path exists, user can read stats, path supports
                 hashing and supplied checksum algorithm is available
-            type: string
+            type: str
             sample: 50ba294cdf28c0d5bcde25708df53346825a429f
         pw_name:
             description: User name of owner
             returned: success, path exists and user can read stats and installed python supports it
-            type: string
+            type: str
             sample: httpd
         gr_name:
             description: Group name of owner
             returned: success, path exists and user can read stats and installed python supports it
-            type: string
+            type: str
             sample: www-data
-        mime_type:
+        mimetype:
             description: file magic data or mime-type
             returned: success, path exists and user can read stats and
                 installed python supports it and the `mime` option was true, will
                 return 'unknown' on error.
-            type: string
-            sample: PDF document, version 1.2
+            type: str
+            sample: application/pdf; charset=binary
         charset:
             description: file character set or encoding
             returned: success, path exists and user can read stats and
                 installed python supports it and the `mime` option was true, will
                 return 'unknown' on error.
-            type: string
+            type: str
             sample: us-ascii
         readable:
             description: Tells you if the invoking user has the right to read the path
             returned: success, path exists and user can read the path
-            type: boolean
+            type: bool
             sample: False
             version_added: 2.2
         writeable:
             description: Tells you if the invoking user has the right to write the path
             returned: success, path exists and user can write the path
-            type: boolean
+            type: bool
             sample: False
             version_added: 2.2
         executable:
             description: Tells you if the invoking user has the execute the path
             returned: success, path exists and user can execute the path
-            type: boolean
+            type: bool
             sample: False
             version_added: 2.2
         attributes:
             description: list of file attributes
             returned: success, path exists and user can execute the path
-            type: boolean
+            type: list
             sample: [ immutable, extent ]
             version_added: 2.3
 '''
@@ -364,9 +373,9 @@ import pwd
 import stat
 
 # import module snippets
-from ansible.module_utils.basic import AnsibleModule, format_attributes
-from ansible.module_utils.pycompat24 import get_exception
+from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils._text import to_bytes
+
 
 def format_output(module, path, st):
     mode = st.st_mode
@@ -405,12 +414,12 @@ def format_output(module, path, st):
         isgid=bool(mode & stat.S_ISGID),
     )
 
-    # Platform dependant flags:
+    # Platform dependent flags:
     for other in [
             # Some Linux
-            ('st_blocks','blocks'),
+            ('st_blocks', 'blocks'),
             ('st_blksize', 'block_size'),
-            ('st_rdev','device_type'),
+            ('st_rdev', 'device_type'),
             ('st_flags', 'flags'),
             # Some Berkley based
             ('st_gen', 'generation'),
@@ -419,7 +428,7 @@ def format_output(module, path, st):
             ('st_ftype', 'file_type'),
             ('st_attrs', 'attrs'),
             ('st_obtype', 'object_type'),
-            # OS X
+            # macOS
             ('st_rsize', 'real_size'),
             ('st_creator', 'creator'),
             ('st_type', 'file_type'),
@@ -427,24 +436,23 @@ def format_output(module, path, st):
         if hasattr(st, other[0]):
             output[other[1]] = getattr(st, other[0])
 
-
     return output
 
 
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            path=dict(required=True, type='path'),
-            follow=dict(default='no', type='bool'),
-            get_md5=dict(default='yes', type='bool'),
-            get_checksum=dict(default='yes', type='bool'),
-            get_mime=dict(default=True, type='bool', aliases=['mime', 'mime_type', 'mime-type']),
-            get_attributes=dict(default=True, type='bool', aliases=['attributes', 'attr']),
-            checksum_algorithm=dict(default='sha1', type='str',
-                                    choices=['sha1', 'sha224', 'sha256', 'sha384', 'sha512'],
-                                    aliases=['checksum_algo', 'checksum']),
+            path=dict(type='path', required=True),
+            follow=dict(type='bool', default=False),
+            get_md5=dict(type='bool'),
+            get_checksum=dict(type='bool', default=True),
+            get_mime=dict(type='bool', default=True, aliases=['mime', 'mime_type', 'mime-type']),
+            get_attributes=dict(type='bool', default=True, aliases=['attr', 'attributes']),
+            checksum_algorithm=dict(type='str', default='sha1',
+                                    choices=['md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512'],
+                                    aliases=['checksum', 'checksum_algo']),
         ),
-        supports_check_mode=True
+        supports_check_mode=True,
     )
 
     path = module.params.get('path')
@@ -453,6 +461,14 @@ def main():
     get_mime = module.params.get('get_mime')
     get_attr = module.params.get('get_attributes')
     get_md5 = module.params.get('get_md5')
+
+    # get_md5 will be an undocumented option in 2.9 to be removed at a later
+    # date if possible (3.0+)
+    if get_md5:
+        module.deprecate("get_md5 has been deprecated along with the md5 return value, use "
+                         "get_checksum=True and checksum_algorithm=md5 instead", 2.9)
+    else:
+        get_md5 = False
     get_checksum = module.params.get('get_checksum')
     checksum_algorithm = module.params.get('checksum_algorithm')
 
@@ -462,8 +478,7 @@ def main():
             st = os.stat(b_path)
         else:
             st = os.lstat(b_path)
-    except OSError:
-        e = get_exception()
+    except OSError as e:
         if e.errno == errno.ENOENT:
             output = {'exists': False}
             module.exit_json(changed=False, stat=output)
@@ -475,22 +490,23 @@ def main():
 
     # resolved permissions
     for perm in [('readable', os.R_OK), ('writeable', os.W_OK), ('executable', os.X_OK)]:
-        output[perm[0]] = os.access(path, perm[1])
+        output[perm[0]] = os.access(b_path, perm[1])
 
     # symlink info
     if output.get('islnk'):
-        output['lnk_source'] = os.path.realpath(path)
+        output['lnk_source'] = os.path.realpath(b_path)
+        output['lnk_target'] = os.readlink(b_path)
 
-    try: # user data
+    try:  # user data
         pw = pwd.getpwuid(st.st_uid)
         output['pw_name'] = pw.pw_name
-    except:
+    except (TypeError, KeyError):
         pass
 
-    try: # group data
+    try:  # group data
         grp_info = grp.getgrgid(st.st_gid)
         output['gr_name'] = grp_info.gr_name
-    except:
+    except (KeyError, ValueError, OverflowError):
         pass
 
     # checksums
@@ -498,26 +514,26 @@ def main():
         if get_md5:
             # Will fail on FIPS-140 compliant systems
             try:
-                output['md5'] = module.md5(path)
+                output['md5'] = module.md5(b_path)
             except ValueError:
                 output['md5'] = None
 
         if get_checksum:
-            output['checksum'] = module.digest_from_file(path, checksum_algorithm)
+            output['checksum'] = module.digest_from_file(b_path, checksum_algorithm)
 
     # try to get mime data if requested
     if get_mime:
         output['mimetype'] = output['charset'] = 'unknown'
         mimecmd = module.get_bin_path('file')
         if mimecmd:
-            mimecmd = [mimecmd, '-i', path]
+            mimecmd = [mimecmd, '-i', b_path]
             try:
                 rc, out, err = module.run_command(mimecmd)
                 if rc == 0:
                     mimetype, charset = out.split(':')[1].split(';')
                     output['mimetype'] = mimetype.strip()
                     output['charset'] = charset.split('=')[1].strip()
-            except:
+            except Exception:
                 pass
 
     # try to get attr data
@@ -525,12 +541,13 @@ def main():
         output['version'] = None
         output['attributes'] = []
         output['attr_flags'] = ''
-        out = module.get_file_attributes(path)
+        out = module.get_file_attributes(b_path)
         for x in ('version', 'attributes', 'attr_flags'):
             if x in out:
                 output[x] = out[x]
 
     module.exit_json(changed=False, stat=output)
+
 
 if __name__ == '__main__':
     main()

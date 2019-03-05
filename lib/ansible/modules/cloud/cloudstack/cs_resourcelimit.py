@@ -1,26 +1,13 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 #
-# (c) 2016, René Moser <mail@renemoser.net>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2016, René Moser <mail@renemoser.net>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['stableinterface'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -52,42 +39,35 @@ options:
     description:
       - Maximum number of the resource.
       - Default is unlimited C(-1).
-    required: false
     default: -1
     aliases: [ 'max' ]
   domain:
     description:
       - Domain the resource is related to.
-    required: false
-    default: null
   account:
     description:
       - Account the resource is related to.
-    required: false
-    default: null
   project:
     description:
       - Name of the project the resource is related to.
-    required: false
-    default: null
 extends_documentation_fragment: cloudstack
 '''
 
 EXAMPLES = '''
-# Update a resource limit for instances of a domain
-local_action:
-  module: cs_resourcelimit
-  type: instance
-  limit: 10
-  domain: customers
+- name: Update a resource limit for instances of a domain
+  local_action:
+    module: cs_resourcelimit
+    type: instance
+    limit: 10
+    domain: customers
 
-# Update a resource limit for instances of an account
-local_action:
-  module: cs_resourcelimit
-  type: instance
-  limit: 12
-  account: moserre
-  domain: customers
+- name: Update a resource limit for instances of an account
+  local_action:
+    module: cs_resourcelimit
+    type: instance
+    limit: 12
+    account: moserre
+    domain: customers
 '''
 
 RETURN = '''
@@ -95,7 +75,7 @@ RETURN = '''
 recource_type:
   description: Type of the resource
   returned: success
-  type: string
+  type: str
   sample: instance
 limit:
   description: Maximum number of the resource.
@@ -105,17 +85,17 @@ limit:
 domain:
   description: Domain the resource is related to.
   returned: success
-  type: string
+  type: str
   sample: example domain
 account:
   description: Account the resource is related to.
   returned: success
-  type: string
+  type: str
   sample: example account
 project:
   description: Project the resource is related to.
   returned: success
-  type: string
+  type: str
   sample: example project
 '''
 
@@ -123,7 +103,6 @@ project:
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.cloudstack import (
     AnsibleCloudStack,
-    CloudStackException,
     cs_required_together,
     cs_argument_spec
 )
@@ -163,7 +142,7 @@ class AnsibleCloudStackResourceLimit(AnsibleCloudStack):
             'projectid': self.get_project(key='id'),
             'resourcetype': self.get_resource_type()
         }
-        resource_limit = self.cs.listResourceLimits(**args)
+        resource_limit = self.query_api('listResourceLimits', **args)
         if resource_limit:
             if 'limit' in resource_limit['resourcelimit'][0]:
                 resource_limit['resourcelimit'][0]['limit'] = int(resource_limit['resourcelimit'][0])
@@ -184,9 +163,7 @@ class AnsibleCloudStackResourceLimit(AnsibleCloudStack):
         if self.has_changed(args, resource_limit):
             self.result['changed'] = True
             if not self.module.check_mode:
-                res = self.cs.updateResourceLimit(**args)
-                if 'errortext' in res:
-                    self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
+                res = self.query_api('updateResourceLimit', **args)
                 resource_limit = res['resourcelimit']
         return resource_limit
 
@@ -201,9 +178,9 @@ def main():
     argument_spec.update(dict(
         resource_type=dict(required=True, choices=RESOURCE_TYPES.keys(), aliases=['type']),
         limit=dict(default=-1, aliases=['max'], type='int'),
-        domain=dict(default=None),
-        account=dict(default=None),
-        project=dict(default=None),
+        domain=dict(),
+        account=dict(),
+        project=dict(),
     ))
 
     module = AnsibleModule(
@@ -212,14 +189,9 @@ def main():
         supports_check_mode=True
     )
 
-    try:
-        acs_resource_limit = AnsibleCloudStackResourceLimit(module)
-        resource_limit = acs_resource_limit.update_resource_limit()
-        result = acs_resource_limit.get_result(resource_limit)
-
-    except CloudStackException as e:
-        module.fail_json(msg='CloudStackException: %s' % str(e))
-
+    acs_resource_limit = AnsibleCloudStackResourceLimit(module)
+    resource_limit = acs_resource_limit.update_resource_limit()
+    result = acs_resource_limit.get_result(resource_limit)
     module.exit_json(**result)
 
 
